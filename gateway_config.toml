@@ -1,0 +1,30 @@
+[[sources]]
+name = "gateway_request"
+glob = "gateway_example.log"
+type = "span"
+start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2}\.\d{6})\s+(?P<requestreference>\S+)\sInHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)'
+nested = [
+  {
+    name = "gateway_transaction",
+    type = 'span',
+    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)',
+    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)',
+    reference_fields = ['requestreference', 'transactionreference'],
+    nested = [
+      {
+        name = "gateway_transaction_request",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<encrypted_request>\S+)'
+      },
+      {
+        name = "gateway_transaction_response",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<encrypted_response>\S+)'
+      },
+    ]
+  },
+]
+end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2}\.\d{6})\s+(?P<requestreference>\S+)\sReturn (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s'
+reference_fields = ["requestreference"]
+timestamp_format = "%Y-%m-%d %H:%M:%S%.6f"
+
