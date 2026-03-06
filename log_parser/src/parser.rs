@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
+use chrono::NaiveDateTime;
 use regex::Regex;
 
 use crate::{
@@ -21,9 +22,21 @@ pub enum Parser {
         end_pattern: Regex,
         nested: Vec<Parser>,
         reference_fields: Vec<String>,
-        // pending: HashMap<SpanReference, PendingSpan>
+        pending: PendingSpans,
     },
 }
+
+#[derive(Debug, Clone)]
+struct SpanReference(Vec<String>);
+
+#[derive(Debug, Clone)]
+struct PendingSpan {
+    timestamp: NaiveDateTime,
+    data: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PendingSpans(RefCell<HashMap<SpanReference, PendingSpan>>);
 
 impl Parser {
     pub fn name(&self) -> &str {
@@ -120,6 +133,7 @@ impl Parser {
             timestamp_format: timestamp_format.into(),
             reference_fields,
             nested: nested_parsers,
+            pending: PendingSpans::default(),
         })
     }
 
@@ -199,6 +213,7 @@ impl Parser {
                 end_pattern: _,
                 nested: _,
                 reference_fields: _,
+                pending: _,
             } => {
                 todo!()
             }
@@ -212,11 +227,63 @@ fn error(msg: &str) -> LogParserError {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDateTime;
+    use chrono::{Duration, NaiveDateTime};
 
     use super::*;
 
     const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
+
+    fn test_span(data: &[(&str, &str)], timestamp: &str, duration: i64) -> Event {
+        let (ts, data_map) = common_test_data(data, timestamp);
+        Event::Span {
+            source: "test".into(),
+            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
+            data: data_map,
+            duration: Duration::new(duration, 0).unwrap(),
+        }
+    }
+
+    fn test_single(data: &[(&str, &str)], timestamp: &str) -> Event {
+        let (ts, data_map) = common_test_data(data, timestamp);
+        Event::Single {
+            name: "test".into(),
+            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
+            data: data_map,
+        }
+    }
+
+    fn common_test_data(
+        data: &[(&str, &str)],
+        timestamp: &str,
+    ) -> (String, HashMap<String, String>) {
+        let mut data_map = HashMap::from([("timestamp".into(), timestamp.to_string())]);
+        for (k, v) in data.iter() {
+            data_map.insert(k.to_string(), v.to_string());
+        }
+        (timestamp.to_owned(), data_map)
+    }
+
+    #[test]
+    fn test_span_parse() {
+        for (start_pattern, end_pattern, log, expected) in [(
+            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s(?P<ref>[a-z0-9]{5})\s+START",
+            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s(?P<ref>[a-z0-9]{5})\s+END",
+            "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END",
+            vec![test_span(&[], "2026-01-01 00:00:00", 5)],
+        )] {
+            let parser = Parser::Span {
+                name: "test".into(),
+                timestamp_format: TS_FMT.into(),
+                start_pattern: Regex::new(start_pattern).unwrap(),
+                end_pattern: Regex::new(end_pattern).unwrap(),
+                nested: vec![],
+                reference_fields: vec!["ref".into()],
+                pending: PendingSpans::default(),
+            };
+            let actual = parser.parse(log);
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[test]
     fn test_single_parse() {
@@ -224,51 +291,28 @@ mod tests {
             (
                 r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
                 "2026-01-01 12:34:56",
-                vec![Event::Single {
-                    name: "test".into(),
-                    timestamp: NaiveDateTime::parse_from_str("2026-01-01 12:34:56", TS_FMT)
-                        .unwrap(),
-                    data: HashMap::from([("timestamp".into(), "2026-01-01 12:34:56".into())]),
-                }],
+                vec![test_single(&[], "2026-01-01 12:34:56")],
             ),
             (
                 r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.+)",
                 "2026-03-05 08:00:00 INFO Server started",
-                vec![Event::Single {
-                    name: "test".into(),
-                    timestamp: NaiveDateTime::parse_from_str("2026-03-05 08:00:00", TS_FMT)
-                        .unwrap(),
-                    data: HashMap::from([
-                        ("timestamp".into(), "2026-03-05 08:00:00".into()),
-                        ("level".into(), "INFO".into()),
-                        ("message".into(), "Server started".into()),
-                    ]),
-                }],
+                vec![test_single(
+                    &[("level", "INFO"), ("message", "Server started")],
+                    "2026-03-05 08:00:00",
+                )],
             ),
             (
                 r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<user>\S+) (?P<action>\S+)",
                 "not a log line\n2026-06-15 09:30:00 alice LOGIN\n2026-06-15 09:30:02 steve LOGIN\nskipped line",
                 vec![
-                    Event::Single {
-                        name: "test".into(),
-                        timestamp: NaiveDateTime::parse_from_str("2026-06-15 09:30:00", TS_FMT)
-                            .unwrap(),
-                        data: HashMap::from([
-                            ("timestamp".into(), "2026-06-15 09:30:00".into()),
-                            ("user".into(), "alice".into()),
-                            ("action".into(), "LOGIN".into()),
-                        ]),
-                    },
-                    Event::Single {
-                        name: "test".into(),
-                        timestamp: NaiveDateTime::parse_from_str("2026-06-15 09:30:02", TS_FMT)
-                            .unwrap(),
-                        data: HashMap::from([
-                            ("timestamp".into(), "2026-06-15 09:30:02".into()),
-                            ("user".into(), "steve".into()),
-                            ("action".into(), "LOGIN".into()),
-                        ]),
-                    },
+                    test_single(
+                        &[("user", "alice"), ("action", "LOGIN")],
+                        "2026-06-15 09:30:00",
+                    ),
+                    test_single(
+                        &[("user", "steve"), ("action", "LOGIN")],
+                        "2026-06-15 09:30:02",
+                    ),
                 ],
             ),
             (
@@ -321,6 +365,7 @@ mod tests {
             end_pattern,
             nested,
             reference_fields,
+            pending,
         } = &parser
         else {
             panic!("expected gateway_request to be a Span parser");
@@ -345,6 +390,7 @@ mod tests {
             end_pattern,
             nested,
             reference_fields,
+            pending,
         } = &nested[0]
         else {
             panic!("expected gateway_transaction to be a Span parser");
