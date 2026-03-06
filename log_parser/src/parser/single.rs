@@ -20,6 +20,7 @@ impl InternalSingleParser {
                     &captures["timestamp"],
                     &self.timestamp_format,
                 ) else {
+                    // TODO do we want to log here? Error?
                     continue;
                 };
                 let mut data = HashMap::new();

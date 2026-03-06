@@ -96,12 +96,17 @@ impl Parser {
                 return Err(error("nested should be an array"));
             }
         }
-        let start_pattern =
-            Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
-        let end_pattern =
-            Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
-        Self::validate_required_pattern_fields(&start_pattern, &Self::REQUIRED_FIELDS)?;
-        Self::validate_required_pattern_fields(&end_pattern, &Self::REQUIRED_FIELDS)?;
+        let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
+        let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
+        for pattern in [&start_pattern, &end_pattern] {
+            Self::validate_required_pattern_fields(
+                pattern,
+                Self::REQUIRED_FIELDS
+                    .iter()
+                    .copied()
+                    .chain(reference_fields.iter().map(|s| s.as_str())),
+            )?;
+        }
         Ok(Parser::Span(InternalSpanParser::new(
             name.into(),
             timestamp_format.into(),
@@ -114,13 +119,15 @@ impl Parser {
 
     fn validate_required_pattern_fields(
         pattern: &Regex,
-        fields: &[&str],
+        fields: impl IntoIterator<Item: AsRef<str>>,
     ) -> LogParserResult<()> {
         let mut missing = vec![];
-        let mut capture_names = pattern.capture_names().into_iter();
         for f in fields {
-            if !capture_names.any(|c| c.is_some_and(|c| c == *f)) {
-                missing.push(*f);
+            if !pattern
+                .capture_names()
+                .any(|c| c.is_some_and(|c| c == f.as_ref()))
+            {
+                missing.push(f.as_ref().to_owned());
             }
         }
         if !missing.is_empty() {
@@ -141,7 +148,7 @@ impl Parser {
         timestamp_format: &str,
     ) -> LogParserResult<Parser> {
         let pattern = Regex::new(Self::parse_and_validate_str("pattern", t)?.into())?;
-        Self::validate_required_pattern_fields(&pattern, &Self::REQUIRED_FIELDS)?;
+        Self::validate_required_pattern_fields(&pattern, Self::REQUIRED_FIELDS)?;
         Ok(Parser::Single(InternalSingleParser {
             name: name.into(),
             pattern,
@@ -165,7 +172,7 @@ fn error(msg: &str) -> LogParserError {
 pub(crate) mod tests {
     use std::collections::HashMap;
 
-    use chrono::NaiveDateTime;
+    use chrono::{Duration, NaiveDateTime};
 
     use super::*;
 
@@ -206,58 +213,224 @@ pub(crate) mod tests {
     #[test]
     fn parse_gateway_log() {
         let parsers = create_gateway_parsers();
+        let events = parsers[0].parse(GW_EXAMPLE);
+        let expected = 30;
+        assert_eq!(events.len(), expected);
+        assert_eq!(
+            events[0],
+            Event::Span {
+                name: "".into(),
+                timestamp: NaiveDateTime::parse_from_str(
+                    "2026-02-02 00:00:01",
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                .unwrap(),
+                data: HashMap::new(),
+                duration: Duration::new(0, 0).unwrap()
+            }
+        );
         let events = parsers[1].parse(GW_EXAMPLE);
         let expected = vec![
-            todo_event("2026-02-02 00:00:01", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'THREEDLOOKUP',)"),
-            todo_event("2026-02-02 00:00:01", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:01", "W55-cQwjqjkB:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}"),
-            todo_event("2026-02-02 00:00:01", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:01", "W55-5ujkqBxE:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}"),
-            todo_event("2026-02-02 00:00:01", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:01", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "W55-a6ryg5ar:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "W55-2w91GRYj:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "W55-BbbN06b0:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "W55-4knFAG75:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "W55-6bR1tuNh:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "W55-wYNYwYgH:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)"),
-            todo_event("2026-02-02 00:00:02", "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)"),
-            todo_event("2026-02-02 00:00:03", "W55-q6Fepa99:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:03", "W55-hm45fq3f:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 2, 'ST5PPRO': 2}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-bwBv9HY3:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-yc5N13vH:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-vfekR4kT:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-eB3x96Ra:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'BARCLAYS': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'AUTH',)"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-pfqRf0Qk:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'PAYSAFE': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-v08A0j4R:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-pf4ce1Af:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests ['RISKDEC2'] requesttypes ('RISKDEC2',)"),
-            todo_event("2026-02-02 00:00:03", "W55-0b8nF5vw:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
-            todo_event("2026-02-02 00:00:03", "W55-GEY370H1:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}"),
-            todo_event("2026-02-02 00:00:03", "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)"),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'THREEDLOOKUP',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "W55-cQwjqjkB:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "W55-5ujkqBxE:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:01",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "W55-a6ryg5ar:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "W55-2w91GRYj:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "W55-BbbN06b0:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "W55-4knFAG75:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "W55-6bR1tuNh:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "W55-wYNYwYgH:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:02",
+                "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-q6Fepa99:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-hm45fq3f:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 2, 'ST5PPRO': 2}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-bwBv9HY3:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-yc5N13vH:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-vfekR4kT:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-eB3x96Ra:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'BARCLAYS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'AUTH',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-pfqRf0Qk:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'PAYSAFE': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-v08A0j4R:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-pf4ce1Af:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests ['RISKDEC2'] requesttypes ('RISKDEC2',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-0b8nF5vw:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "W55-GEY370H1:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}",
+            ),
+            todo_event(
+                "2026-02-02 00:00:03",
+                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
+            ),
         ];
         assert_eq!(events, expected);
     }
@@ -295,7 +468,10 @@ pub(crate) mod tests {
             txn.end_pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)"
         );
-        assert_eq!(txn.reference_fields, &["requestreference", "transactionreference"]);
+        assert_eq!(
+            txn.reference_fields,
+            &["requestreference", "transactionreference"]
+        );
         assert_eq!(txn.nested.len(), 2);
 
         let Parser::Single(txn_req) = &txn.nested[0] else {

@@ -2,7 +2,7 @@
 name = "gateway_request"
 glob = "gateway_example.log"
 type = "span"
-start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2})\s+(?P<requestreference>\S+)\sInHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)'
+start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+InHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)'
 nested = [
   {
     name = "gateway_transaction",
@@ -22,13 +22,12 @@ nested = [
         name = "gateway_transaction_response",
         type = "single",
         glob = "gateway_example.log",
-        timestamp_format = "%Y-%m-%d %H:%M:%S",
         pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<encrypted_response>\S+)'
       },
     ]
   },
 ]
-end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2})\s+(?P<requestreference>\S+)\sReturn (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s'
+end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+Return (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s'
 reference_fields = ["requestreference"]
 timestamp_format = "%Y-%m-%d %H:%M:%S"
 

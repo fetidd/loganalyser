@@ -5,7 +5,7 @@ use chrono::Duration;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Span {
-        source: String,
+        name: String,
         timestamp: chrono::NaiveDateTime,
         data: HashMap<String, String>,
         duration: Duration,
