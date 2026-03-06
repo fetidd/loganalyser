@@ -1,7 +1,10 @@
-use std::{cell::RefCell, collections::HashMap};
+mod single;
+mod span;
 
-use chrono::NaiveDateTime;
 use regex::Regex;
+
+pub use single::InternalSingleParser;
+pub use span::InternalSpanParser;
 
 use crate::{
     error::{LogParserError, LogParserResult},
@@ -10,49 +13,22 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Parser {
-    Single {
-        name: String,
-        pattern: Regex,
-        timestamp_format: String,
-    },
-    Span {
-        name: String,
-        timestamp_format: String,
-        start_pattern: Regex,
-        end_pattern: Regex,
-        nested: Vec<Parser>,
-        reference_fields: Vec<String>,
-        pending: PendingSpans,
-    },
+    Single(InternalSingleParser),
+    Span(InternalSpanParser),
 }
-
-#[derive(Debug, Clone)]
-struct SpanReference(Vec<String>);
-
-#[derive(Debug, Clone)]
-struct PendingSpan {
-    timestamp: NaiveDateTime,
-    data: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct PendingSpans(RefCell<HashMap<SpanReference, PendingSpan>>);
 
 impl Parser {
     pub fn name(&self) -> &str {
         match self {
-            Parser::Single { name, .. } | Parser::Span { name, .. } => name,
+            Parser::Single(p) => &p.name,
+            Parser::Span(p) => &p.name,
         }
     }
 
     pub fn timestamp_format(&self) -> &str {
         match self {
-            Parser::Single {
-                timestamp_format, ..
-            }
-            | Parser::Span {
-                timestamp_format, ..
-            } => timestamp_format,
+            Parser::Single(p) => &p.timestamp_format,
+            Parser::Span(p) => &p.timestamp_format,
         }
     }
 
@@ -121,24 +97,23 @@ impl Parser {
             }
         }
         let start_pattern =
-            regex::Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
+            Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern =
-            regex::Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
+            Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
         Self::validate_required_pattern_fields(&start_pattern, &Self::REQUIRED_FIELDS)?;
         Self::validate_required_pattern_fields(&end_pattern, &Self::REQUIRED_FIELDS)?;
-        Ok(Parser::Span {
-            name: name.into(),
+        Ok(Parser::Span(InternalSpanParser::new(
+            name.into(),
+            timestamp_format.into(),
             start_pattern,
             end_pattern,
-            timestamp_format: timestamp_format.into(),
+            nested_parsers,
             reference_fields,
-            nested: nested_parsers,
-            pending: PendingSpans::default(),
-        })
+        )))
     }
 
     fn validate_required_pattern_fields(
-        pattern: &regex::Regex,
+        pattern: &Regex,
         fields: &[&str],
     ) -> LogParserResult<()> {
         let mut missing = vec![];
@@ -159,6 +134,7 @@ impl Parser {
     }
 
     const REQUIRED_FIELDS: [&str; 1] = ["timestamp"];
+
     fn build_single(
         t: &toml::Table,
         name: &str,
@@ -166,57 +142,17 @@ impl Parser {
     ) -> LogParserResult<Parser> {
         let pattern = Regex::new(Self::parse_and_validate_str("pattern", t)?.into())?;
         Self::validate_required_pattern_fields(&pattern, &Self::REQUIRED_FIELDS)?;
-        Ok(Parser::Single {
+        Ok(Parser::Single(InternalSingleParser {
             name: name.into(),
             pattern,
             timestamp_format: timestamp_format.into(),
-        })
+        }))
     }
 
     pub fn parse(&self, input: &str) -> Vec<Event> {
         match self {
-            Parser::Single {
-                name,
-                pattern,
-                timestamp_format,
-            } => {
-                let mut events = vec![];
-                for line in input.lines() {
-                    if let Some(captures) = pattern.captures(line) {
-                        let Ok(timestamp) = chrono::NaiveDateTime::parse_from_str(
-                            &captures["timestamp"],
-                            &timestamp_format,
-                        ) else {
-                            continue;
-                        };
-                        let mut data = HashMap::new();
-                        for field in pattern.capture_names() {
-                            if let Some(field) = field
-                                && let Some(value) = captures.name(field)
-                            {
-                                data.insert(field.to_owned(), value.as_str().to_owned());
-                            }
-                        }
-                        events.push(Event::Single {
-                            name: name.to_owned(),
-                            timestamp,
-                            data,
-                        });
-                    }
-                }
-                events
-            }
-            Parser::Span {
-                name: _,
-                timestamp_format: _,
-                start_pattern: _,
-                end_pattern: _,
-                nested: _,
-                reference_fields: _,
-                pending: _,
-            } => {
-                todo!()
-            }
+            Parser::Single(p) => p.parse(input),
+            Parser::Span(p) => p.parse(input),
         }
     }
 }
@@ -227,6 +163,8 @@ fn error(msg: &str) -> LogParserError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use chrono::{Duration, NaiveDateTime};
 
     use super::*;
@@ -271,15 +209,14 @@ mod tests {
             "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END",
             vec![test_span(&[], "2026-01-01 00:00:00", 5)],
         )] {
-            let parser = Parser::Span {
-                name: "test".into(),
-                timestamp_format: TS_FMT.into(),
-                start_pattern: Regex::new(start_pattern).unwrap(),
-                end_pattern: Regex::new(end_pattern).unwrap(),
-                nested: vec![],
-                reference_fields: vec!["ref".into()],
-                pending: PendingSpans::default(),
-            };
+            let parser = Parser::Span(InternalSpanParser::new(
+                "test".into(),
+                TS_FMT.into(),
+                Regex::new(start_pattern).unwrap(),
+                Regex::new(end_pattern).unwrap(),
+                vec![],
+                vec!["ref".into()],
+            ));
             let actual = parser.parse(log);
             assert_eq!(actual, expected);
         }
@@ -321,18 +258,18 @@ mod tests {
                 vec![],
             ),
         ] {
-            let parser = Parser::Single {
+            let parser = Parser::Single(InternalSingleParser {
                 name: "test".into(),
                 pattern: Regex::new(pattern).unwrap(),
                 timestamp_format: TS_FMT.into(),
-            };
+            });
             let actual = parser.parse(log);
             assert_eq!(actual, expected);
         }
     }
 
-    const GW_EXAMPLE: &str = include_str!("../../gateway_example.log");
-    const GW_CONFIG: &str = include_str!("../../gateway_config.toml");
+    const GW_EXAMPLE: &str = include_str!("../../../gateway_example.log");
+    const GW_CONFIG: &str = include_str!("../../../gateway_config.toml");
 
     fn create_gateway_parsers() -> Vec<Parser> {
         let table: toml::Table = toml::from_str(GW_CONFIG).expect("failed to read toml to str");
@@ -358,86 +295,55 @@ mod tests {
     fn test_create_gateway_parsers() {
         let parsers = create_gateway_parsers();
         let parser = parsers[0].clone();
-        let Parser::Span {
-            name,
-            timestamp_format,
-            start_pattern,
-            end_pattern,
-            nested,
-            reference_fields,
-            pending,
-        } = &parser
-        else {
+        let Parser::Span(req) = &parser else {
             panic!("expected gateway_request to be a Span parser");
         };
-        assert_eq!(name, "gateway_request");
-        assert_eq!(timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert_eq!(req.name, "gateway_request");
+        assert_eq!(req.timestamp_format, "%Y-%m-%d %H:%M:%S");
         assert_eq!(
-            start_pattern.as_str(),
+            req.start_pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2})\s+(?P<requestreference>\S+)\sInHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)"
         );
         assert_eq!(
-            end_pattern.as_str(),
+            req.end_pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2})\s+(?P<requestreference>\S+)\sReturn (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s"
         );
-        assert_eq!(reference_fields, &["requestreference"]);
-        assert_eq!(nested.len(), 1);
+        assert_eq!(req.reference_fields, &["requestreference"]);
+        assert_eq!(req.nested.len(), 1);
 
-        let Parser::Span {
-            name,
-            timestamp_format,
-            start_pattern,
-            end_pattern,
-            nested,
-            reference_fields,
-            pending,
-        } = &nested[0]
-        else {
+        let Parser::Span(txn) = &req.nested[0] else {
             panic!("expected gateway_transaction to be a Span parser");
         };
-        assert_eq!(name, "gateway_transaction");
-        assert_eq!(timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert_eq!(txn.name, "gateway_transaction");
+        assert_eq!(txn.timestamp_format, "%Y-%m-%d %H:%M:%S");
         assert_eq!(
-            start_pattern.as_str(),
+            txn.start_pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)"
         );
         assert_eq!(
-            end_pattern.as_str(),
+            txn.end_pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)"
         );
-        assert_eq!(
-            reference_fields,
-            &["requestreference", "transactionreference"]
-        );
-        assert_eq!(nested.len(), 2);
+        assert_eq!(txn.reference_fields, &["requestreference", "transactionreference"]);
+        assert_eq!(txn.nested.len(), 2);
 
-        let Parser::Single {
-            name,
-            timestamp_format,
-            pattern,
-        } = &nested[0]
-        else {
+        let Parser::Single(txn_req) = &txn.nested[0] else {
             panic!("expected gateway_transaction_request to be a Single parser");
         };
-        assert_eq!(name, "gateway_transaction_request");
-        assert_eq!(timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert_eq!(txn_req.name, "gateway_transaction_request");
+        assert_eq!(txn_req.timestamp_format, "%Y-%m-%d %H:%M:%S");
         assert_eq!(
-            pattern.as_str(),
+            txn_req.pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<encrypted_request>\S+)"
         );
 
-        let Parser::Single {
-            name,
-            timestamp_format,
-            pattern,
-        } = &nested[1]
-        else {
+        let Parser::Single(txn_res) = &txn.nested[1] else {
             panic!("expected gateway_transaction_response to be a Single parser");
         };
-        assert_eq!(name, "gateway_transaction_response");
-        assert_eq!(timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert_eq!(txn_res.name, "gateway_transaction_response");
+        assert_eq!(txn_res.timestamp_format, "%Y-%m-%d %H:%M:%S");
         assert_eq!(
-            pattern.as_str(),
+            txn_res.pattern.as_str(),
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<encrypted_response>\S+)"
         );
     }
