@@ -40,3 +40,71 @@ impl InternalSingleParser {
         events
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDateTime;
+    use regex::Regex;
+
+    use crate::event::Event;
+
+    use super::super::tests::common_test_data;
+    use super::*;
+
+    const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
+
+    fn test_single(data: &[(&str, &str)], timestamp: &str) -> Event {
+        let (ts, data_map) = common_test_data(data, timestamp);
+        Event::Single {
+            name: "test".into(),
+            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
+            data: data_map,
+        }
+    }
+
+    #[test]
+    fn test_single_parse() {
+        for (pattern, log, expected) in [
+            (
+                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+                "2026-01-01 12:34:56",
+                vec![test_single(&[], "2026-01-01 12:34:56")],
+            ),
+            (
+                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.+)",
+                "2026-03-05 08:00:00 INFO Server started",
+                vec![test_single(
+                    &[("level", "INFO"), ("message", "Server started")],
+                    "2026-03-05 08:00:00",
+                )],
+            ),
+            (
+                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<user>\S+) (?P<action>\S+)",
+                "not a log line\n2026-06-15 09:30:00 alice LOGIN\n2026-06-15 09:30:02 steve LOGIN\nskipped line",
+                vec![
+                    test_single(
+                        &[("user", "alice"), ("action", "LOGIN")],
+                        "2026-06-15 09:30:00",
+                    ),
+                    test_single(
+                        &[("user", "steve"), ("action", "LOGIN")],
+                        "2026-06-15 09:30:02",
+                    ),
+                ],
+            ),
+            (
+                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+                "",
+                vec![],
+            ),
+        ] {
+            let parser = InternalSingleParser {
+                name: "test".into(),
+                pattern: Regex::new(pattern).unwrap(),
+                timestamp_format: TS_FMT.into(),
+            };
+            let actual = parser.parse(log);
+            assert_eq!(actual, expected);
+        }
+    }
+}

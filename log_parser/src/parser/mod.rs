@@ -162,35 +162,12 @@ fn error(msg: &str) -> LogParserError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashMap;
-
-    use chrono::{Duration, NaiveDateTime};
 
     use super::*;
 
-    const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
-
-    fn test_span(data: &[(&str, &str)], timestamp: &str, duration: i64) -> Event {
-        let (ts, data_map) = common_test_data(data, timestamp);
-        Event::Span {
-            source: "test".into(),
-            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
-            data: data_map,
-            duration: Duration::new(duration, 0).unwrap(),
-        }
-    }
-
-    fn test_single(data: &[(&str, &str)], timestamp: &str) -> Event {
-        let (ts, data_map) = common_test_data(data, timestamp);
-        Event::Single {
-            name: "test".into(),
-            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
-            data: data_map,
-        }
-    }
-
-    fn common_test_data(
+    pub(crate) fn common_test_data(
         data: &[(&str, &str)],
         timestamp: &str,
     ) -> (String, HashMap<String, String>) {
@@ -199,73 +176,6 @@ mod tests {
             data_map.insert(k.to_string(), v.to_string());
         }
         (timestamp.to_owned(), data_map)
-    }
-
-    #[test]
-    fn test_span_parse() {
-        for (start_pattern, end_pattern, log, expected) in [(
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s(?P<ref>[a-z0-9]{5})\s+START",
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s(?P<ref>[a-z0-9]{5})\s+END",
-            "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END",
-            vec![test_span(&[], "2026-01-01 00:00:00", 5)],
-        )] {
-            let parser = Parser::Span(InternalSpanParser::new(
-                "test".into(),
-                TS_FMT.into(),
-                Regex::new(start_pattern).unwrap(),
-                Regex::new(end_pattern).unwrap(),
-                vec![],
-                vec!["ref".into()],
-            ));
-            let actual = parser.parse(log);
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    fn test_single_parse() {
-        for (pattern, log, expected) in [
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
-                "2026-01-01 12:34:56",
-                vec![test_single(&[], "2026-01-01 12:34:56")],
-            ),
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.+)",
-                "2026-03-05 08:00:00 INFO Server started",
-                vec![test_single(
-                    &[("level", "INFO"), ("message", "Server started")],
-                    "2026-03-05 08:00:00",
-                )],
-            ),
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<user>\S+) (?P<action>\S+)",
-                "not a log line\n2026-06-15 09:30:00 alice LOGIN\n2026-06-15 09:30:02 steve LOGIN\nskipped line",
-                vec![
-                    test_single(
-                        &[("user", "alice"), ("action", "LOGIN")],
-                        "2026-06-15 09:30:00",
-                    ),
-                    test_single(
-                        &[("user", "steve"), ("action", "LOGIN")],
-                        "2026-06-15 09:30:02",
-                    ),
-                ],
-            ),
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
-                "",
-                vec![],
-            ),
-        ] {
-            let parser = Parser::Single(InternalSingleParser {
-                name: "test".into(),
-                pattern: Regex::new(pattern).unwrap(),
-                timestamp_format: TS_FMT.into(),
-            });
-            let actual = parser.parse(log);
-            assert_eq!(actual, expected);
-        }
     }
 
     const GW_EXAMPLE: &str = include_str!("../../../gateway_example.log");
