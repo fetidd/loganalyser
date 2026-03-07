@@ -522,4 +522,450 @@ pub(crate) mod tests {
             r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<encrypted_response>\S+)"
         );
     }
+
+    // ---- Additional imports for unit tests below ----
+    use regex::Regex;
+    use rstest::rstest;
+
+    // ---- TOML fixtures ----
+
+    const SINGLE_VALID: &str = r#"
+type = "single"
+name = "my_parser"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+pattern = '(?P<timestamp>\d+) (?P<level>\w+)'
+"#;
+
+    const SPAN_VALID: &str = r#"
+type = "span"
+name = "my_span"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+start_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+"#;
+
+    const SPAN_EMPTY_NESTED: &str = r#"
+type = "span"
+name = "my_span"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+start_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = []
+"#;
+
+    const SPAN_ONE_NESTED: &str = r#"
+type = "span"
+name = "my_span"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+start_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)' }]
+"#;
+
+    const SPAN_TWO_NESTED: &str = r#"
+type = "span"
+name = "my_span"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+start_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [
+  { type = "single", name = "n1", pattern = '(?P<timestamp>.+)' },
+  { type = "single", name = "n2", pattern = '(?P<timestamp>.+)' }
+]
+"#;
+
+    const SPAN_NESTED_INHERITS_TS_FMT: &str = r#"
+type = "span"
+name = "my_span"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+start_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)' }]
+"#;
+
+    const SPAN_NESTED_OVERRIDES_TS_FMT: &str = r#"
+type = "span"
+name = "my_span"
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+start_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>\d+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestamp_format = "%Y" }]
+"#;
+
+    // ---- extract_timestamp ----
+
+    #[rstest]
+    #[case("2026-01-15 08:30:00", "%Y-%m-%d %H:%M:%S",
+        Some(NaiveDateTime::parse_from_str("2026-01-15 08:30:00", "%Y-%m-%d %H:%M:%S").unwrap()))]
+    #[case("2026-01-01 00:00:00", "%Y-%m-%d %H:%M:%S",
+        Some(NaiveDateTime::parse_from_str("2026-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()))]
+    #[case("2026-12-31 23:59:59", "%Y-%m-%d %H:%M:%S",
+        Some(NaiveDateTime::parse_from_str("2026-12-31 23:59:59", "%Y-%m-%d %H:%M:%S").unwrap()))]
+    #[case("15/01/2026 08:30:00", "%d/%m/%Y %H:%M:%S",
+        Some(NaiveDateTime::parse_from_str("15/01/2026 08:30:00", "%d/%m/%Y %H:%M:%S").unwrap()))]
+    #[case("", "%Y-%m-%d %H:%M:%S", None)]
+    #[case("not a timestamp", "%Y-%m-%d %H:%M:%S", None)]
+    #[case("2026-01-15 08:30:00", "%d/%m/%Y %H:%M:%S", None)] // value doesn't match format
+    #[case("2026-01-15", "%Y-%m-%d %H:%M:%S", None)] // date only, format expects time
+    #[case("2026-13-01 00:00:00", "%Y-%m-%d %H:%M:%S", None)] // invalid month
+    #[case("2026-01-15 08:30:00 extra", "%Y-%m-%d %H:%M:%S", None)] // trailing chars
+    fn test_extract_timestamp(
+        #[case] ts: &str,
+        #[case] fmt: &str,
+        #[case] expected: Option<NaiveDateTime>,
+    ) {
+        assert_eq!(extract_timestamp(ts, fmt), expected);
+    }
+
+    // ---- extract_data ----
+
+    #[rstest]
+    #[case(r"(?P<level>\w+)", "INFO", vec![("level", "INFO")])]
+    #[case(r"(?P<ts>\d+) (?P<msg>.+)", "1234 hello world", vec![("ts", "1234"), ("msg", "hello world")])]
+    #[case(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})", "2026-03-07",
+        vec![("year", "2026"), ("month", "03"), ("day", "07")])]
+    #[case(r"(?P<a>\w+)(?P<b> \w+)?", "hello", vec![("a", "hello")])] // optional group absent
+    #[case(r"(\d+) (?P<name>\w+)", "42 alice", vec![("name", "alice")])] // unnamed group excluded
+    #[case(r"\d+", "99", vec![])] // no named groups at all
+    #[case(r"(?P<prefix>a?)b", "b", vec![("prefix", "")])] // named group captures empty string
+    fn test_extract_data(
+        #[case] pattern: &str,
+        #[case] input: &str,
+        #[case] expected: Vec<(&str, &str)>,
+    ) {
+        let re = Regex::new(pattern).unwrap();
+        let captures = re.captures(input).unwrap();
+        let mut capture_names = re.capture_names();
+        let actual = extract_data(&mut capture_names, &captures);
+        let expected_map: HashMap<String, String> = expected
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+        assert_eq!(actual, expected_map);
+    }
+
+    // ---- parse_and_validate_str ----
+
+    #[rstest]
+    #[case(r#"name = "foo""#, "name", "foo")]
+    #[case(r#"name = """#, "name", "")]
+    fn test_parse_and_validate_str_ok(
+        #[case] toml_str: &str,
+        #[case] field: &str,
+        #[case] expected: &str,
+    ) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        assert_eq!(Parser::parse_and_validate_str(field, &t).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case(r#"other = "x""#, "name", "missing name")]
+    #[case(r#"name = 42"#, "name", "name was not a string")]
+    #[case(r#"name = ["a", "b"]"#, "name", "name was not a string")]
+    #[case(r#"name = true"#, "name", "name was not a string")]
+    fn test_parse_and_validate_str_err(
+        #[case] toml_str: &str,
+        #[case] field: &str,
+        #[case] expected_err: &str,
+    ) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::parse_and_validate_str(field, &t).unwrap_err();
+        assert!(
+            err.to_string().contains(expected_err),
+            "expected error containing {expected_err:?}, got: {}",
+            err.to_string()
+        );
+    }
+
+    // ---- validate_required_pattern_fields ----
+
+    #[rstest]
+    #[case(r"(?P<timestamp>\d+) (?P<level>\w+)", vec!["timestamp", "level"])]
+    #[case(r"(?P<timestamp>\d+)", vec!["timestamp"])]
+    #[case(r"(?P<timestamp>\d+)", vec![])]
+    #[case(r"(?P<timestamp>\d+) (?P<extra>.+)", vec!["timestamp"])] // extra fields in pattern are fine
+    fn test_validate_required_pattern_fields_ok(
+        #[case] pattern: &str,
+        #[case] fields: Vec<&str>,
+    ) {
+        let re = Regex::new(pattern).unwrap();
+        assert!(Parser::validate_required_pattern_fields(&re, fields).is_ok());
+    }
+
+    #[rstest]
+    #[case(r"(?P<level>\w+)", vec!["timestamp"], "timestamp")]
+    #[case(r"(?P<other>\w+)", vec!["timestamp", "level"], "timestamp")] // both missing, error mentions first
+    #[case(r"(\d+)(\w+)", vec!["timestamp"], "timestamp")] // only unnamed groups
+    fn test_validate_required_pattern_fields_err(
+        #[case] pattern: &str,
+        #[case] fields: Vec<&str>,
+        #[case] expected_in_err: &str,
+    ) {
+        let re = Regex::new(pattern).unwrap();
+        let err = Parser::validate_required_pattern_fields(&re, fields).unwrap_err();
+        assert!(
+            err.to_string().contains(expected_in_err),
+            "expected error containing {expected_in_err:?}, got: {}",
+            err.to_string()
+        );
+    }
+
+    // ---- from_toml — Single parser ----
+
+    #[test]
+    fn test_from_toml_single_valid() {
+        let t: toml::Table = toml::from_str(SINGLE_VALID).unwrap();
+        let parser = Parser::from_toml(&t).unwrap();
+        let Parser::Single(p) = parser else { panic!("expected Single") };
+        assert_eq!(p.name, "my_parser");
+        assert_eq!(p.timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert!(p.pattern.capture_names().any(|c| c == Some("timestamp")));
+        assert!(p.pattern.capture_names().any(|c| c == Some("level")));
+    }
+
+    #[rstest]
+    #[case(
+        r#"name = "t"
+timestamp_format = "%Y"
+pattern = '(?P<timestamp>.+)'"#,
+        "missing type"
+    )]
+    #[case(
+        r#"type = "single"
+timestamp_format = "%Y"
+pattern = '(?P<timestamp>.+)'"#,
+        "missing name"
+    )]
+    #[case(
+        r#"type = "single"
+name = "t"
+pattern = '(?P<timestamp>.+)'"#,
+        "missing timestamp_format"
+    )]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y""#,
+        "missing pattern"
+    )]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y"
+pattern = '[invalid'"#,
+        "bad regex"
+    )]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y"
+pattern = '(?P<level>\w+)'"#,
+        "timestamp"
+    )] // pattern missing timestamp capture group
+    fn test_from_toml_single_err(#[case] toml_str: &str, #[case] expected_err: &str) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains(expected_err),
+            "expected error containing {expected_err:?}, got: {}",
+            err.to_string()
+        );
+    }
+
+    // ---- from_toml — Span parser ----
+
+    #[test]
+    fn test_from_toml_span_valid() {
+        let t: toml::Table = toml::from_str(SPAN_VALID).unwrap();
+        let parser = Parser::from_toml(&t).unwrap();
+        let Parser::Span(p) = parser else { panic!("expected Span") };
+        assert_eq!(p.name, "my_span");
+        assert_eq!(p.timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert_eq!(p.reference_fields, &["ref"]);
+        assert_eq!(p.nested.len(), 0);
+    }
+
+    #[rstest]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'"#,
+        "missing reference_fields"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = "ref""#,
+        "reference_fields not an array"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = [1, 2]"#,
+        "reference_fields elements must be strings"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]"#,
+        "missing start_pattern"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+reference_fields = ["ref"]"#,
+        "missing end_pattern"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '[invalid'
+end_pattern = '(?P<timestamp>.+) END'
+reference_fields = []"#,
+        "bad regex"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<ref>\S+) START'
+end_pattern = '(?P<ref>\S+) END'
+reference_fields = ["ref"]"#,
+        "timestamp"
+    )] // patterns missing timestamp group
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) START'
+end_pattern = '(?P<timestamp>.+) END'
+reference_fields = ["ref"]"#,
+        "ref"
+    )] // reference field not in patterns
+    fn test_from_toml_span_err(#[case] toml_str: &str, #[case] expected_err: &str) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains(expected_err),
+            "expected error containing {expected_err:?}, got: {}",
+            err.to_string()
+        );
+    }
+
+    // ---- parse_nested (tested via from_toml on span configs) ----
+
+    #[rstest]
+    #[case(SPAN_VALID, 0)]       // no nested key
+    #[case(SPAN_EMPTY_NESTED, 0)] // nested = []
+    #[case(SPAN_ONE_NESTED, 1)]  // one nested single
+    #[case(SPAN_TWO_NESTED, 2)]  // two nested singles
+    fn test_parse_nested_count(#[case] toml_str: &str, #[case] expected_count: usize) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let Parser::Span(p) = Parser::from_toml(&t).unwrap() else {
+            panic!("expected Span");
+        };
+        assert_eq!(p.nested.len(), expected_count);
+    }
+
+    #[rstest]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) START'
+end_pattern = '(?P<timestamp>.+) END'
+reference_fields = []
+nested = "not an array""#,
+        "nested should be an array"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) START'
+end_pattern = '(?P<timestamp>.+) END'
+reference_fields = []
+nested = ["not a table"]"#,
+        "nested elements must be toml tables"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) START'
+end_pattern = '(?P<timestamp>.+) END'
+reference_fields = []
+nested = [{ name = "n", pattern = '(?P<timestamp>.+)' }]"#,
+        "missing type"
+    )]
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) START'
+end_pattern = '(?P<timestamp>.+) END'
+reference_fields = []
+nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestamp_format = 42 }]"#,
+        "timestamp_format was not a string"
+    )]
+    fn test_parse_nested_err(#[case] toml_str: &str, #[case] expected_err: &str) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains(expected_err),
+            "expected error containing {expected_err:?}, got: {}",
+            err.to_string()
+        );
+    }
+
+    #[test]
+    fn test_nested_inherits_parent_timestamp_format() {
+        let t: toml::Table = toml::from_str(SPAN_NESTED_INHERITS_TS_FMT).unwrap();
+        let Parser::Span(p) = Parser::from_toml(&t).unwrap() else { panic!() };
+        let Parser::Single(nested) = &p.nested[0] else { panic!() };
+        assert_eq!(nested.timestamp_format, "%Y-%m-%d %H:%M:%S");
+    }
+
+    #[test]
+    fn test_nested_overrides_timestamp_format() {
+        let t: toml::Table = toml::from_str(SPAN_NESTED_OVERRIDES_TS_FMT).unwrap();
+        let Parser::Span(p) = Parser::from_toml(&t).unwrap() else { panic!() };
+        let Parser::Single(nested) = &p.nested[0] else { panic!() };
+        assert_eq!(nested.timestamp_format, "%Y");
+    }
+
+    // ---- Parser::name() and Parser::timestamp_format() ----
+
+    #[rstest]
+    #[case(SINGLE_VALID, "my_parser", "%Y-%m-%d %H:%M:%S")]
+    #[case(SPAN_VALID, "my_span", "%Y-%m-%d %H:%M:%S")]
+    fn test_parser_name_and_timestamp_format(
+        #[case] toml_str: &str,
+        #[case] expected_name: &str,
+        #[case] expected_ts_fmt: &str,
+    ) {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let parser = Parser::from_toml(&t).unwrap();
+        assert_eq!(parser.name(), expected_name);
+        assert_eq!(parser.timestamp_format(), expected_ts_fmt);
+    }
 }

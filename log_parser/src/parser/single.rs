@@ -75,6 +75,16 @@ mod tests {
         "",
         vec![],
     )]
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+        "   \n  \n",
+        vec![],
+    )] // whitespace-only lines
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+        "2026-01-01 00:00:00 2026-02-02 00:00:00",
+        vec![test_single(&[], "2026-01-01 00:00:00")],
+    )] // only first match per line is captured
     fn test_single_parse(#[case] pattern: &str, #[case] log: &str, #[case] expected: Vec<Event>) {
         let mut parser = InternalSingleParser {
             name: "test".into(),
@@ -84,5 +94,17 @@ mod tests {
         let mut actual = parser.parse(log);
         actual.iter_mut().for_each(|f| f.set_id(TEST_ID));
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_single_parse_timestamp_format_mismatch() {
+        // Pattern matches, but the captured timestamp doesn't parse with the format → line skipped
+        let mut parser = InternalSingleParser {
+            name: "test".into(),
+            pattern: Regex::new(r"(?P<timestamp>[0-9/]+ [0-9:]+)").unwrap(),
+            timestamp_format: TS_FMT.into(), // expects "%Y-%m-%d %H:%M:%S", not slash format
+        };
+        let actual = parser.parse("15/01/2026 08:00:00");
+        assert!(actual.is_empty());
     }
 }

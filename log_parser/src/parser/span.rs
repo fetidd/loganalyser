@@ -155,6 +155,40 @@ mod tests {
         "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:03 abc01 nested\n2026-01-01 00:00:03 abc02 nested\n2026-01-01 00:00:05 abc01 END",
         vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5)],
     )]
+    #[case(
+        START,
+        END,
+        // two sequential non-overlapping spans
+        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END\n2026-01-01 00:00:10 abc02 START\n2026-01-01 00:00:15 abc02 END",
+        vec![
+            test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5),
+            test_span(&[("ref", "abc02")], "2026-01-01 00:00:10", 5),
+        ],
+    )]
+    #[case(
+        START,
+        END,
+        // two overlapping concurrent spans with different ref values
+        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:02 abc02 START\n2026-01-01 00:00:05 abc01 END\n2026-01-01 00:00:08 abc02 END",
+        vec![
+            test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5),
+            test_span(&[("ref", "abc02")], "2026-01-01 00:00:02", 6),
+        ],
+    )]
+    #[case(START, END, "", vec![])] // empty input
+    #[case(
+        START,
+        END,
+        "2026-01-01 00:00:00 abc01 START", // start only, no matching end
+        vec![],
+    )]
+    #[case(
+        START,
+        END,
+        // zero-duration span: start and end at same timestamp
+        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:00 abc01 END",
+        vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 0)],
+    )]
     fn test_span_parse(
         #[case] start_pattern: &str,
         #[case] end_pattern: &str,
