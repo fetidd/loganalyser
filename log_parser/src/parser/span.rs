@@ -81,7 +81,7 @@ impl InternalSpanParser {
                 let mut capture_names = self.start_pattern.capture_names();
                 let data = self.extract_data(&mut capture_names, &start_captures);
                 let span_reference = self.extract_span_reference(&data);
-                let pending_span = PendingSpan { timestamp, data };
+                let pending_span = PendingSpan::new(timestamp, data);
                 self.pending
                     .0
                     .borrow_mut()
@@ -100,15 +100,17 @@ impl InternalSpanParser {
                     };
                     data.extend(pending_span.data); // TODO chekcx if this ends up overwiritng and if we want to stop that - we want it to overwrite the timestamp because its the start timestamp we want
                     let duration = end_timestamp - pending_span.timestamp;
-                    events.push(Event::Span {
-                        name: self.name.clone(),
-                        timestamp: pending_span.timestamp,
+                    events.push(Event::new_span(
+                        &self.name,
+                        pending_span.timestamp,
                         data,
                         duration,
-                    })
+                    ))
                 } else {
                     panic!("FOUND AN END LINE WITHOUT A PENDING SPAN FOR IT!")
                 }
+            } else if !self.nested.is_empty() {
+                todo!()
             }
         }
         dbg!(&self.pending);
@@ -125,15 +127,26 @@ struct PendingSpan {
     data: HashMap<String, String>,
 }
 
+impl PendingSpan {
+    fn new(timestamp: NaiveDateTime, data: HashMap<String, String>) -> Self {
+        Self { timestamp, data }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct PendingSpans(RefCell<HashMap<SpanReference, PendingSpan>>);
 
 #[cfg(test)]
 mod tests {
+    use std::cell::{LazyCell, OnceCell};
+
     use chrono::{Duration, NaiveDateTime};
     use regex::Regex;
+    use uuid::Uuid;
 
     use crate::event::Event;
+    use crate::parser::InternalSingleParser;
+    use crate::parser::tests::TEST_ID;
 
     use super::super::tests::common_test_data;
     use super::*;
@@ -147,26 +160,47 @@ mod tests {
             timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data: data_map,
             duration: Duration::new(duration, 0).unwrap(),
+            id: TEST_ID.to_string(),
         }
     }
 
     #[test]
     fn test_span_parse() {
-        for (start_pattern, end_pattern, log, expected) in [(
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s(?P<ref>[a-z0-9]{5})\s+START",
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s(?P<ref>[a-z0-9]{5})\s+END",
-            "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END",
-            vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5)],
-        )] {
+        let start =
+            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+START";
+        let end =
+            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+END";
+        for (start_pattern, end_pattern, log, expected) in [
+            (
+                start,
+                end,
+                "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END",
+                vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5)],
+            ),
+            (
+                start,
+                end,
+                "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:03 abc01 nested\n2026-01-01 00:00:03 abc02 nested\n2026-01-01 00:00:05 abc01 END",
+                vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5)], // checks that nested events work, but only if they have the same reference value
+            ),
+        ] {
             let parser = InternalSpanParser::new(
                 "test".into(),
                 TS_FMT.into(),
                 Regex::new(start_pattern).unwrap(),
                 Regex::new(end_pattern).unwrap(),
-                vec![],
+                vec![Parser::Single(InternalSingleParser {
+                    name: "test_inner".into(),
+                    pattern: Regex::new(
+                        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+nested",
+                    )
+                    .unwrap(),
+                    timestamp_format: TS_FMT.to_string(),
+                })],
                 vec!["ref".into()],
             );
-            let actual = parser.parse(log);
+            let mut actual = parser.parse(log);
+            actual.iter_mut().for_each(|f| f.set_id(TEST_ID));
             assert_eq!(actual, expected);
         }
     }

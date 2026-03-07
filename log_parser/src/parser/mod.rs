@@ -170,9 +170,10 @@ fn error(msg: &str) -> LogParserError {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::HashMap;
+    use std::{cell::LazyCell, collections::HashMap};
 
     use chrono::{Duration, NaiveDateTime};
+    use uuid::Uuid;
 
     use super::*;
 
@@ -184,6 +185,7 @@ pub(crate) mod tests {
                 ("timestamp".into(), timestamp.into()),
                 ("todo".into(), todo.into()),
             ]),
+            id: TEST_ID.to_string(),
         }
     }
 
@@ -200,6 +202,7 @@ pub(crate) mod tests {
 
     const GW_EXAMPLE: &str = include_str!("../../../gateway_example.log");
     const GW_CONFIG: &str = include_str!("../../../gateway_config.toml");
+    pub(super) const TEST_ID: &str = "test_id";
 
     fn create_gateway_parsers() -> Vec<Parser> {
         let table: toml::Table = toml::from_str(GW_CONFIG).expect("failed to read toml to str");
@@ -226,10 +229,11 @@ pub(crate) mod tests {
                 )
                 .unwrap(),
                 data: HashMap::new(),
-                duration: Duration::new(0, 0).unwrap()
+                duration: Duration::new(0, 0).unwrap(),
+                id: events[0].id().to_string()
             }
         );
-        let events = parsers[1].parse(GW_EXAMPLE);
+        let mut events = parsers[1].parse(GW_EXAMPLE);
         let expected = vec![
             todo_event(
                 "2026-02-02 00:00:01",
@@ -432,6 +436,7 @@ pub(crate) mod tests {
                 "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
             ),
         ];
+        events.iter_mut().for_each(|f| f.set_id(TEST_ID.clone()));
         assert_eq!(events, expected);
     }
 
@@ -446,11 +451,11 @@ pub(crate) mod tests {
         assert_eq!(req.timestamp_format, "%Y-%m-%d %H:%M:%S");
         assert_eq!(
             req.start_pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2})\s+(?P<requestreference>\S+)\sInHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)"
+            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+InHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)"
         );
         assert_eq!(
             req.end_pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}\d{2})\s+(?P<requestreference>\S+)\sReturn (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s"
+            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+Return (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s"
         );
         assert_eq!(req.reference_fields, &["requestreference"]);
         assert_eq!(req.nested.len(), 1);

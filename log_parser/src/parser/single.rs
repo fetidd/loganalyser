@@ -31,11 +31,7 @@ impl InternalSingleParser {
                         data.insert(field.to_owned(), value.as_str().to_owned());
                     }
                 }
-                events.push(Event::Single {
-                    name: self.name.to_owned(),
-                    timestamp,
-                    data,
-                });
+                events.push(Event::new_single(&self.name, timestamp, data));
             }
         }
         events
@@ -48,6 +44,7 @@ mod tests {
     use regex::Regex;
 
     use crate::event::Event;
+    use crate::parser::tests::TEST_ID;
 
     use super::super::tests::common_test_data;
     use super::*;
@@ -60,6 +57,7 @@ mod tests {
             name: "test".into(),
             timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data: data_map,
+            id: TEST_ID.to_string(),
         }
     }
 
@@ -104,7 +102,8 @@ mod tests {
                 pattern: Regex::new(pattern).unwrap(),
                 timestamp_format: TS_FMT.into(),
             };
-            let actual = parser.parse(log);
+            let mut actual = parser.parse(log);
+            actual.iter_mut().for_each(|f| f.set_id(TEST_ID));
             assert_eq!(actual, expected);
         }
     }
