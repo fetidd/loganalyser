@@ -11,19 +11,25 @@ pub struct InternalSingleParser {
 
 impl InternalSingleParser {
     pub(super) fn parse(&mut self, input: &str) -> Vec<Event> {
-        let mut events = vec![];
-        for line in input.lines() {
-            if let Some(captures) = self.pattern.captures(line) {
-                let Some(timestamp) = super::extract_timestamp(&captures["timestamp"], &self.timestamp_format) else {
-                    // TODO do we want to log here? Error?
-                    continue;
-                };
-                let mut capture_names = self.pattern.capture_names();
-                let data = super::extract_data(&mut capture_names, &captures);
-                events.push(Event::new_single(&self.name, timestamp, data));
-            }
+        input
+            .lines()
+            .filter_map(|line| self.parse_line(line))
+            .collect()
+    }
+
+    pub(super) fn parse_line(&mut self, input: &str) -> Option<Event> {
+        if let Some(captures) = self.pattern.captures(input) {
+            let Some(timestamp) =
+                super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
+            else {
+                // TODO do we want to log here? Error?
+                return None;
+            };
+            let mut capture_names = self.pattern.capture_names();
+            let data = super::extract_data(&mut capture_names, &captures);
+            return Some(Event::new_single(&self.name, timestamp, data));
         }
-        events
+        None
     }
 }
 
@@ -107,5 +113,27 @@ mod tests {
         };
         let actual = parser.parse("15/01/2026 08:00:00");
         assert!(actual.is_empty());
+    }
+
+    #[rstest]
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+        "2026-01-01 00:00:00 2026-02-02 00:00:00",
+        Some(test_single(&[], "2026-01-01 00:00:00"))
+    )]
+    fn test_parse_line(#[case] pattern: &str, #[case] line: &str, #[case] expected: Option<Event>) {
+        let mut parser = InternalSingleParser {
+            name: "test".into(),
+            pattern: Regex::new(pattern).unwrap(),
+            timestamp_format: TS_FMT.into(),
+        };
+        let actual = parser.parse_line(line);
+        if [&actual, &expected].into_iter().all(Option::is_some) {
+            let (mut actual, expected) = (actual.unwrap(), expected.unwrap());
+            actual.set_id(TEST_ID);
+            assert_eq!(actual, expected);
+        } else if ![&actual, &expected].into_iter().all(Option::is_none) {
+            panic!("{actual:?} != {expected:?}");
+        }
     }
 }
