@@ -70,7 +70,7 @@ impl InternalSpanParser {
         )
     }
 
-    pub(super) fn parse(&self, input: &str) -> Vec<Event> {
+    pub(super) fn parse(&mut self, input: &str) -> Vec<Event> {
         let mut events = vec![];
         for line in input.lines() {
             if let Some(start_captures) = self.start_pattern.captures(line) {
@@ -84,14 +84,13 @@ impl InternalSpanParser {
                 let pending_span = PendingSpan::new(timestamp, data);
                 self.pending
                     .0
-                    .borrow_mut()
                     .insert(span_reference, pending_span);
             } else if let Some(end_captures) = self.end_pattern.captures(line) {
                 let mut capture_names = self.end_pattern.capture_names();
                 let mut data = self.extract_data(&mut capture_names, &end_captures);
                 let span_reference = self.extract_span_reference(&data);
                 if let Some((_pending_reference, pending_span)) =
-                    self.pending.0.borrow_mut().remove_entry(&span_reference)
+                    self.pending.0.remove_entry(&span_reference)
                 {
                     let Some(end_timestamp) = self.extract_timestamp(&end_captures["timestamp"])
                     else {
@@ -133,15 +132,13 @@ impl PendingSpan {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct PendingSpans(RefCell<HashMap<SpanReference, PendingSpan>>);
+pub(super) struct PendingSpans(HashMap<SpanReference, PendingSpan>);
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{LazyCell, OnceCell};
 
     use chrono::{Duration, NaiveDateTime};
     use regex::Regex;
-    use uuid::Uuid;
 
     use crate::event::Event;
     use crate::parser::InternalSingleParser;
@@ -183,7 +180,7 @@ mod tests {
             //     vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5)], // checks that nested events work, but only if they have the same reference value
             // ),
         ] {
-            let parser = InternalSpanParser::new(
+            let mut parser = InternalSpanParser::new(
                 "test".into(),
                 TS_FMT.into(),
                 Regex::new(start_pattern).unwrap(),

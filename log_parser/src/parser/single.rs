@@ -12,7 +12,7 @@ pub struct InternalSingleParser {
 }
 
 impl InternalSingleParser {
-    pub(super) fn parse(&self, input: &str) -> Vec<Event> {
+    pub(super) fn parse(&mut self, input: &str) -> Vec<Event> {
         let mut events = vec![];
         for line in input.lines() {
             if let Some(captures) = self.pattern.captures(line) {
@@ -97,7 +97,7 @@ mod tests {
                 vec![],
             ),
         ] {
-            let parser = InternalSingleParser {
+            let mut parser = InternalSingleParser {
                 name: "test".into(),
                 pattern: Regex::new(pattern).unwrap(),
                 timestamp_format: TS_FMT.into(),

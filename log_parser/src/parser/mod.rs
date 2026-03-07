@@ -156,7 +156,7 @@ impl Parser {
         }))
     }
 
-    pub fn parse(&self, input: &str) -> Vec<Event> {
+    pub fn parse(&mut self, input: &str) -> Vec<Event> {
         match self {
             Parser::Single(p) => p.parse(input),
             Parser::Span(p) => p.parse(input),
@@ -215,7 +215,7 @@ pub(crate) mod tests {
 
     #[test]
     fn parse_gateway_log() {
-        let parsers = create_gateway_parsers();
+        let mut parsers = create_gateway_parsers();
         // let events = parsers[0].parse(GW_EXAMPLE);
         // let expected = 30;
         // assert_eq!(events.len(), expected);
