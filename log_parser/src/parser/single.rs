@@ -47,7 +47,8 @@ mod tests {
             name: "test".into(),
             timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data: data_map,
-            id: TEST_ID.to_string(),
+            id: TEST_ID,
+            parent_id: None,
         }
     }
 

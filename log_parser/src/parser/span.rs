@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
 use regex::Regex;
+use uuid::Uuid;
 
 use crate::event::Event;
 
@@ -42,7 +43,7 @@ impl InternalSpanParser {
         SpanReference(
             self.reference_fields
                 .iter()
-                .map(|rf| data.get(rf).unwrap().clone()) // when the span parser is built we make sure the reference_fields are in the data
+                .map(|rf| data.get(rf).expect("reference field {rf} missing!").clone()) // when the span parser is built we make sure the reference_fields are in the data
                 .collect(),
         )
     }
@@ -51,7 +52,9 @@ impl InternalSpanParser {
         let mut events = vec![];
         for line in input.lines() {
             if let Some(start_captures) = self.start_pattern.captures(line) {
-                let Some(timestamp) = super::extract_timestamp(&start_captures["timestamp"], &self.timestamp_format) else {
+                let Some(timestamp) =
+                    super::extract_timestamp(&start_captures["timestamp"], &self.timestamp_format)
+                else {
                     // TODO do we want to log here? Error?
                     continue;
                 };
@@ -59,9 +62,7 @@ impl InternalSpanParser {
                 let data = super::extract_data(&mut capture_names, &start_captures);
                 let span_reference = self.extract_span_reference(&data);
                 let pending_span = PendingSpan::new(timestamp, data);
-                self.pending
-                    .0
-                    .insert(span_reference, pending_span);
+                self.pending.0.insert(span_reference, pending_span);
             } else if let Some(end_captures) = self.end_pattern.captures(line) {
                 let mut capture_names = self.end_pattern.capture_names();
                 let mut data = super::extract_data(&mut capture_names, &end_captures);
@@ -69,24 +70,30 @@ impl InternalSpanParser {
                 if let Some((_pending_reference, pending_span)) =
                     self.pending.0.remove_entry(&span_reference)
                 {
-                    let Some(end_timestamp) = super::extract_timestamp(&end_captures["timestamp"], &self.timestamp_format)
-                    else {
+                    let Some(end_timestamp) = super::extract_timestamp(
+                        &end_captures["timestamp"],
+                        &self.timestamp_format,
+                    ) else {
                         // TODO do we want to log here? Error?
                         continue;
                     };
                     data.extend(pending_span.data); // TODO chekcx if this ends up overwiritng and if we want to stop that - we want it to overwrite the timestamp because its the start timestamp we want
                     let duration = end_timestamp - pending_span.timestamp;
-                    events.push(Event::new_span(
-                        &self.name,
-                        pending_span.timestamp,
+                    events.push(Event::Span {
+                        id: pending_span.id,
+                        name: self.name.clone(),
+                        timestamp: pending_span.timestamp,
                         data,
                         duration,
-                    ))
+                        parent_id: None,
+                    })
                 } else {
-                    panic!("FOUND AN END LINE WITHOUT A PENDING SPAN FOR IT!")
+                    panic!("FOUND AN END LINE {span_reference:?} WITHOUT A PENDING SPAN FOR IT!")
                 }
             } else if !self.nested.is_empty() {
-                todo!()
+                for parser in self.nested.iter_mut() {
+                    events.extend(parser.parse(line));
+                }
             }
         }
         events
@@ -98,13 +105,18 @@ struct SpanReference(Vec<String>);
 
 #[derive(Debug, Clone)]
 struct PendingSpan {
+    id: Uuid,
     timestamp: NaiveDateTime,
     data: HashMap<String, String>,
 }
 
 impl PendingSpan {
     fn new(timestamp: NaiveDateTime, data: HashMap<String, String>) -> Self {
-        Self { timestamp, data }
+        Self {
+            timestamp,
+            data,
+            id: Uuid::new_v4(),
+        }
     }
 }
 
@@ -137,7 +149,8 @@ mod tests {
             timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data: data_map,
             duration: Duration::new(duration, 0).unwrap(),
-            id: TEST_ID.to_string(),
+            id: TEST_ID,
+            parent_id: None,
         }
     }
 
@@ -152,14 +165,20 @@ mod tests {
         START,
         END,
         // checks that nested events work, but only if they have the same reference value
-        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:03 abc01 nested\n2026-01-01 00:00:03 abc02 nested\n2026-01-01 00:00:05 abc01 END",
+        r#"2026-01-01 00:00:00 abc01 START
+2026-01-01 00:00:03 abc01 nested
+2026-01-01 00:00:03 abc02 nested
+2026-01-01 00:00:05 abc01 END"#,
         vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5)],
     )]
     #[case(
         START,
         END,
         // two sequential non-overlapping spans
-        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:05 abc01 END\n2026-01-01 00:00:10 abc02 START\n2026-01-01 00:00:15 abc02 END",
+        r#"2026-01-01 00:00:00 abc01 START
+2026-01-01 00:00:05 abc01 END
+2026-01-01 00:00:10 abc02 START
+2026-01-01 00:00:15 abc02 END"#,
         vec![
             test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5),
             test_span(&[("ref", "abc02")], "2026-01-01 00:00:10", 5),
@@ -169,7 +188,10 @@ mod tests {
         START,
         END,
         // two overlapping concurrent spans with different ref values
-        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:02 abc02 START\n2026-01-01 00:00:05 abc01 END\n2026-01-01 00:00:08 abc02 END",
+        r#"2026-01-01 00:00:00 abc01 START
+2026-01-01 00:00:02 abc02 START
+2026-01-01 00:00:05 abc01 END
+2026-01-01 00:00:08 abc02 END"#,
         vec![
             test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 5),
             test_span(&[("ref", "abc02")], "2026-01-01 00:00:02", 6),
@@ -186,7 +208,8 @@ mod tests {
         START,
         END,
         // zero-duration span: start and end at same timestamp
-        "2026-01-01 00:00:00 abc01 START\n2026-01-01 00:00:00 abc01 END",
+        r#"2026-01-01 00:00:00 abc01 START
+2026-01-01 00:00:00 abc01 END"#,
         vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 0)],
     )]
     fn test_span_parse(

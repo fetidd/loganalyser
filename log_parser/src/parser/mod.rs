@@ -254,6 +254,7 @@ pub(crate) mod tests {
     use std::collections::HashMap;
 
     use chrono::{Duration, NaiveDateTime};
+    use uuid::Uuid;
 
     use super::*;
 
@@ -265,7 +266,8 @@ pub(crate) mod tests {
                 ("timestamp".into(), timestamp.into()),
                 ("todo".into(), todo.into()),
             ]),
-            id: TEST_ID.to_string(),
+            id: TEST_ID,
+            parent_id: None,
         }
     }
 
@@ -282,7 +284,7 @@ pub(crate) mod tests {
 
     const GW_EXAMPLE: &str = include_str!("../../../gateway_example.log");
     const GW_CONFIG: &str = include_str!("../../../gateway_config.toml");
-    pub(super) const TEST_ID: &str = "test_id";
+    pub(super) const TEST_ID: Uuid = Uuid::from_u128(0);
 
     fn create_gateway_parsers() -> Vec<Parser> {
         let table: toml::Table = toml::from_str(GW_CONFIG).expect("failed to read toml to str");
@@ -310,7 +312,8 @@ pub(crate) mod tests {
                 .unwrap(),
                 data: HashMap::new(),
                 duration: Duration::new(0, 0).unwrap(),
-                id: events[0].id().to_string()
+                id: events[0].id(),
+                parent_id: None,
             }
         );
         let mut events = parsers[1].parse(GW_EXAMPLE);

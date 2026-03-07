@@ -6,25 +6,27 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Span {
-        id: String,
+        id: Uuid,
         name: String,
         timestamp: chrono::NaiveDateTime,
         data: HashMap<String, String>,
         duration: Duration,
+        parent_id: Option<Uuid>,
     },
     Single {
-        id: String,
+        id: Uuid,
         name: String,
         timestamp: chrono::NaiveDateTime,
         data: HashMap<String, String>,
+        parent_id: Option<Uuid>,
     },
 }
 
 impl Event {
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> Uuid {
         match self {
-            Event::Span { id, .. } => id.as_str(),
-            Event::Single { id, .. } => id.as_str(),
+            Event::Span { id, .. } => *id,
+            Event::Single { id, .. } => *id,
         }
     }
 
@@ -34,10 +36,11 @@ impl Event {
         data: HashMap<String, String>,
     ) -> Event {
         Event::Single {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             name: name.into(),
             timestamp,
             data,
+            parent_id: None,
         }
     }
 
@@ -48,19 +51,29 @@ impl Event {
         duration: Duration,
     ) -> Event {
         Event::Span {
-            id: Uuid::new_v4().to_string(),
+            id: Uuid::new_v4(),
             name: name.into(),
             timestamp,
             data,
             duration,
+            parent_id: None,
         }
     }
 
+    fn with_parent(mut self, parent_id: Uuid) -> Self {
+        match &mut self {
+            Event::Span { parent_id: p, .. } | Event::Single { parent_id: p, .. } => {
+                *p = Some(parent_id);
+            }
+        }
+        self
+    }
+
     #[cfg(test)]
-    pub(crate) fn set_id(&mut self, new_id: &str) {
+    pub(crate) fn set_id(&mut self, new_id: Uuid) {
         match self {
-            Event::Span { id, .. } => *id = new_id.to_owned(),
-            Event::Single { id, .. } => *id = new_id.to_owned(),
+            Event::Span { id, .. } => *id = new_id,
+            Event::Single { id, .. } => *id = new_id,
         }
     }
 }
@@ -76,43 +89,48 @@ mod tests {
 
     const TS_STR: &str = "2026-01-01 00:00:00";
     const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
+    const ID_A: Uuid = Uuid::from_u128(1);
+    const ID_B: Uuid = Uuid::from_u128(2);
+    const NEW_ID: Uuid = Uuid::from_u128(99);
 
     fn ts() -> NaiveDateTime {
         NaiveDateTime::parse_from_str(TS_STR, TS_FMT).unwrap()
     }
 
-    fn make_single(id: &str) -> Event {
+    fn make_single(id: Uuid) -> Event {
         Event::Single {
-            id: id.to_owned(),
+            id,
             name: "p".into(),
             timestamp: ts(),
             data: HashMap::new(),
+            parent_id: None,
         }
     }
 
-    fn make_span(id: &str) -> Event {
+    fn make_span(id: Uuid) -> Event {
         Event::Span {
-            id: id.to_owned(),
+            id,
             name: "p".into(),
             timestamp: ts(),
             data: HashMap::new(),
             duration: Duration::seconds(1),
+            parent_id: None,
         }
     }
 
     #[rstest]
-    #[case(make_single("abc"), "abc")]
-    #[case(make_span("def"), "def")]
-    fn test_event_id(#[case] event: Event, #[case] expected_id: &str) {
+    #[case(make_single(ID_A), ID_A)]
+    #[case(make_span(ID_B), ID_B)]
+    fn test_event_id(#[case] event: Event, #[case] expected_id: Uuid) {
         assert_eq!(event.id(), expected_id);
     }
 
     #[rstest]
-    #[case(make_single("old"))]
-    #[case(make_span("old"))]
+    #[case(make_single(ID_A))]
+    #[case(make_span(ID_A))]
     fn test_set_id(#[case] mut event: Event) {
-        event.set_id("new_id");
-        assert_eq!(event.id(), "new_id");
+        event.set_id(NEW_ID);
+        assert_eq!(event.id(), NEW_ID);
     }
 
     #[test]
@@ -120,20 +138,27 @@ mod tests {
         let timestamp = ts();
         let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
         let event = Event::new_single("my_parser", timestamp, data.clone());
-        let Event::Single { id, name, timestamp: actual_ts, data: actual_data } = event else {
+        let Event::Single {
+            id,
+            name,
+            timestamp: actual_ts,
+            data: actual_data,
+            ..
+        } = event
+        else {
             panic!("expected Single variant");
         };
         assert_eq!(name, "my_parser");
         assert_eq!(actual_ts, timestamp);
         assert_eq!(actual_data, data);
-        assert_eq!(id.len(), 36); // UUID v4: 32 hex chars + 4 hyphens
+        assert_ne!(id, Uuid::nil());
     }
 
     #[test]
     fn test_new_single_unique_ids() {
         let ts = ts();
-        let id1 = Event::new_single("x", ts, HashMap::new()).id().to_owned();
-        let id2 = Event::new_single("x", ts, HashMap::new()).id().to_owned();
+        let id1 = Event::new_single("x", ts, HashMap::new()).id();
+        let id2 = Event::new_single("x", ts, HashMap::new()).id();
         assert_ne!(id1, id2);
     }
 
@@ -143,21 +168,29 @@ mod tests {
         let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
         let duration = Duration::seconds(42);
         let event = Event::new_span("my_parser", timestamp, data.clone(), duration);
-        let Event::Span { id, name, timestamp: actual_ts, data: actual_data, duration: actual_duration } = event else {
+        let Event::Span {
+            id,
+            name,
+            timestamp: actual_ts,
+            data: actual_data,
+            duration: actual_duration,
+            ..
+        } = event
+        else {
             panic!("expected Span variant");
         };
         assert_eq!(name, "my_parser");
         assert_eq!(actual_ts, timestamp);
         assert_eq!(actual_data, data);
         assert_eq!(actual_duration, duration);
-        assert_eq!(id.len(), 36);
+        assert_ne!(id, Uuid::nil());
     }
 
     #[test]
     fn test_new_span_unique_ids() {
         let ts = ts();
-        let id1 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0)).id().to_owned();
-        let id2 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0)).id().to_owned();
+        let id1 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0)).id();
+        let id2 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0)).id();
         assert_ne!(id1, id2);
     }
 }
