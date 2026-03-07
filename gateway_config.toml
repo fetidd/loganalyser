@@ -3,33 +3,101 @@ name = "gateway_request"
 glob = "gateway_example.log"
 type = "span"
 start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+InHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)'
+end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+Return (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s'
+reference_fields = ["requestreference"]
+timestamp_format = "%Y-%m-%d %H:%M:%S"
 nested = [
   {
-    name = "gateway_transaction",
-    type = 'span',
-    glob = "gateway_example.log",
-    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)',
-    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)',
-    reference_fields = ['transactionreference'], # these fields are used to match nested events and are appended to the parent's fields - all children are required to have these fields present in their patterns
+    name = "gateway_transaction_query",
+    type = "span",
+    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+PASS-JSON-JSON\s+TRANSACTIONQUERY\s+(?P<sitereference>\S+)',
+    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+PASS-JSON-JSON\s+TRANSACTIONQUERY\s+(?P<sitereference>\S+)\s+E:(?P<errorcode>\S+)\s+\S+\s+(?P<time_taken>[0-9\.]+)s',
+    reference_fields = ["transactionreference"],
     nested = [
       {
         name = "gateway_transaction_request",
         type = "single",
-        glob = "gateway_example.log",
-        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<encrypted_request>\S+)'
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<request>.+)'
       },
       {
         name = "gateway_transaction_response",
         type = "single",
-        glob = "gateway_example.log",
-        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<encrypted_response>\S+)'
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<response>.+)'
+      },
+    ]
+  },
+  {
+    name = "gateway_transaction_threedlookup",
+    type = "span",
+    # Note: Bgn has "THREEDLOOKUP ECOM", End has "ECOM THREEDLOOKUP" (order swapped)
+    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+JWT-JWT-JWT\s+THREEDLOOKUP\s+ECOM\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+Parent:(?P<parenttransactionreference>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+(?P<remoteaddr>\S+)\s+Status:(?P<status>\S+)',
+    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+JWT-JWT-JWT\s+ECOM\s+THREEDLOOKUP\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+Parent:(?P<parenttransactionreference>\S+)\s+CacheToken:(?P<cachetoken>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+(?P<remoteaddr>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)\s+\S+\s+(?P<time_taken>[0-9\.]+)s',
+    reference_fields = ["transactionreference"],
+    nested = [
+      {
+        name = "gateway_transaction_request",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<request>.+)'
+      },
+      {
+        name = "gateway_transaction_response",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<response>.+)'
+      },
+    ]
+  },
+  {
+    name = "gateway_transaction_update",
+    type = "span",
+    # transactionreference changes between Bgn (55-0-0 placeholder) and End (real ref),
+    # so we match on sitereference instead. No sub-nested parsers because REQ/RES lines
+    # do not contain sitereference for lookup.
+    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):\S+\s+Bgn:\s+CERT-XML-XML\s+TRANSACTIONUPDATE\s+(?P<sitereference>\S+)\s+Status:(?P<status>\S+)',
+    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):\S+\s+End:\s+CERT-XML-XML\s+TRANSACTIONUPDATE\s+(?P<sitereference>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)\s+\S+\s+(?P<time_taken>[0-9\.]+)s',
+    reference_fields = ["sitereference"]
+  },
+  {
+    name = "gateway_transaction_auth",
+    type = "span",
+    # Note: Bgn has "AUTH RECUR", End has "RECUR AUTH" (order swapped)
+    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+PASS-JSON-JSON\s+AUTH\s+RECUR\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+Parent:(?P<parenttransactionreference>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)',
+    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+PASS-JSON-JSON\s+RECUR\s+AUTH\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+Parent:(?P<parenttransactionreference>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)\s+Authcode:(?P<authcode>\S+)\s+\S+\s+(?P<time_taken>[0-9\.]+)s',
+    reference_fields = ["transactionreference"],
+    nested = [
+      {
+        name = "gateway_transaction_request",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<request>.+)'
+      },
+      {
+        name = "gateway_transaction_response",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<response>.+)'
+      },
+    ]
+  },
+  {
+    name = "gateway_transaction_riskdec2",
+    type = "span",
+    # Note: Bgn has "RISKDEC2 CYBERTONICA", End is assumed to have "CYBERTONICA RISKDEC2"
+    # (consistent with the swap pattern seen in THREEDLOOKUP and AUTH — no End example in log).
+    start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+STGATEWAYAUTO\s+RISKDEC2\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+(?P<remoteaddr>\S+)\s+Status:(?P<status>\S+)',
+    end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+STGATEWAYAUTO\s+(?P<accounttypedescription>\S+)\s+RISKDEC2\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+(?P<remoteaddr>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)\s+\S+\s+(?P<time_taken>[0-9\.]+)s',
+    reference_fields = ["transactionreference"],
+    nested = [
+      {
+        name = "gateway_transaction_request",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<request>.+)'
+      },
+      {
+        name = "gateway_transaction_response",
+        type = "single",
+        pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<response>.+)'
       },
     ]
   },
 ]
-end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+Return (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s'
-reference_fields = ["requestreference"]
-timestamp_format = "%Y-%m-%d %H:%M:%S"
 
 [[parsers]]
 name = "gateway_todos"
