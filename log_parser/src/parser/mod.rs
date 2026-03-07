@@ -157,23 +157,38 @@ impl Parser {
                         .ok_or(error("timestamp_format was not a string"))?,
                     None => timestamp_format,
                 };
+                let config_type = Self::extract_config_type(table)?;
                 let mut reference_fields = vec![];
                 if let Some(parent_reference_fields) = parent_reference_fields {
                     reference_fields.extend(parent_reference_fields.iter().cloned());
                 }
                 if let Some(nested_ref_fields) = table.get("reference_fields") {
-                    nested_ref_fields
+                    let own_fields: Vec<String> = nested_ref_fields
                         .as_array()
                         .ok_or(error("reference_fields must be an array"))?
                         .iter()
                         .map(|v| {
-                            Ok(v.as_str()
-                                .ok_or(error("reference_fields must be strings"))?
-                                .to_owned())
+                            v.as_str()
+                                .ok_or(error("reference_fields must be strings"))
+                                .map(|s| s.to_owned())
                         })
-                        .for_each(|f: LogParserResult<String>| reference_fields.push(f.unwrap())); // safe unwrap because the value is guaranteed to be a string
+                        .collect::<LogParserResult<_>>()?;
+                    if config_type == "span" {
+                        for field in &own_fields {
+                            if reference_fields.contains(field) {
+                                return Err(error(&format!(
+                                    "nested span reference field '{field}' duplicates an inherited field"
+                                )));
+                            }
+                        }
+                    }
+                    reference_fields.extend(own_fields);
+                } else if config_type == "span" {
+                    return Err(error(
+                        "nested span parsers must provide reference_fields to disambiguate from parent",
+                    ));
                 };
-                Self::from_toml_table_and_parts(table, Self::extract_config_type(table)?, nested_ts, Some(reference_fields))
+                Self::from_toml_table_and_parts(table, config_type, nested_ts, Some(reference_fields))
             })
             .collect()
     }
@@ -1024,6 +1039,141 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestam
             panic!()
         };
         assert_eq!(nested.timestamp_format, "%Y");
+    }
+
+    // ---- reference_fields inheritance ----
+
+    #[test]
+    fn test_top_level_span_requires_reference_fields() {
+        let toml_str = r#"
+type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) START'
+end_pattern = '(?P<timestamp>.+) END'
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("reference_fields must be provided for span parsers"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nested_single_inherits_parent_reference_fields() {
+        // parent has reference_fields = ["ref"]; nested single pattern includes (?P<ref>...)
+        let toml_str = r#"
+type = "span"
+name = "outer"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "single", name = "inner", pattern = '(?P<timestamp>.+) (?P<ref>\S+)' }]
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        assert!(Parser::from_toml(&t).is_ok());
+    }
+
+    #[test]
+    fn test_nested_single_err_if_pattern_missing_parent_reference_field() {
+        // parent has reference_fields = ["ref"]; nested single pattern has no (?P<ref>...)
+        let toml_str = r#"
+type = "span"
+name = "outer"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "single", name = "inner", pattern = '(?P<timestamp>.+)' }]
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("ref"),
+            "expected error mentioning 'ref', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nested_span_inherits_parent_and_adds_own_reference_fields() {
+        // inner span patterns contain both the inherited "ref" and its own "sub"
+        let toml_str = r#"
+type = "span"
+name = "outer"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) END', reference_fields = ["sub"] }]
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let parser = Parser::from_toml(&t).unwrap();
+        let Parser::Span(outer) = parser else { panic!("expected Span") };
+        let Parser::Span(inner) = &outer.nested[0] else { panic!("expected nested Span") };
+        // combined: parent's ["ref"] prepended to own ["sub"]
+        assert_eq!(inner.reference_fields, &["ref", "sub"]);
+    }
+
+    #[test]
+    fn test_nested_span_err_if_no_own_reference_fields() {
+        // nested span omits reference_fields entirely — must provide at least one to disambiguate
+        let toml_str = r#"
+type = "span"
+name = "outer"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END' }]
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("nested span parsers must provide reference_fields to disambiguate from parent"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nested_span_err_if_own_reference_field_duplicates_inherited() {
+        // nested span lists "ref" in its own reference_fields, but "ref" is already inherited
+        let toml_str = r#"
+type = "span"
+name = "outer"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) END', reference_fields = ["ref", "sub"] }]
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicates an inherited field"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nested_span_err_if_patterns_missing_inherited_reference_field() {
+        // inner span patterns contain its own "sub" but NOT the inherited "ref"
+        let toml_str = r#"
+type = "span"
+name = "outer"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END'
+reference_fields = ["ref"]
+nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<sub>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<sub>\S+) END', reference_fields = ["sub"] }]
+"#;
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let err = Parser::from_toml(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("ref"),
+            "expected error mentioning 'ref', got: {err}"
+        );
     }
 
     // ---- Parser::name() and Parser::timestamp_format() ----
