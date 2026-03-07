@@ -262,22 +262,11 @@ pub(crate) mod tests {
     use std::collections::HashMap;
 
     use chrono::NaiveDateTime;
+    use regex::Regex;
+    use rstest::rstest;
     use uuid::Uuid;
 
     use super::*;
-
-    fn todo_event(timestamp: &str, todo: &str) -> Event {
-        let mut e = Event::new_single(
-            "gateway_todos",
-            NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S").unwrap(),
-            HashMap::from([
-                ("timestamp".into(), timestamp.into()),
-                ("todo".into(), todo.into()),
-            ]),
-        );
-        e.set_id(TEST_ID);
-        e
-    }
 
     pub(crate) fn common_test_data(
         data: &[(&str, &str)],
@@ -290,296 +279,7 @@ pub(crate) mod tests {
         (timestamp.to_owned(), data_map)
     }
 
-    const GW_EXAMPLE: &str = include_str!("../../../gateway_example.log");
-    const GW_CONFIG: &str = include_str!("../../../gateway_config.toml");
     pub(super) const TEST_ID: Uuid = Uuid::from_u128(0);
-
-    fn create_gateway_parsers() -> Vec<Parser> {
-        let table: toml::Table = toml::from_str(GW_CONFIG).expect("failed to read toml to str");
-        let parsers = table.get("parsers").unwrap().as_array().unwrap();
-        parsers
-            .iter()
-            .map(|p| Parser::from_toml(p.as_table().unwrap()).unwrap())
-            .collect()
-    }
-
-    #[test]
-    fn parse_gateway_log() {
-        let mut parsers = create_gateway_parsers();
-        let events = parsers[0].parse(GW_EXAMPLE);
-        assert_eq!(events.len(), 91);
-        let mut events = parsers[1].parse(GW_EXAMPLE);
-        let expected = vec![
-            todo_event(
-                "2026-02-02 00:00:01",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'THREEDLOOKUP',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:01",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:01",
-                "W55-cQwjqjkB:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:01",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:01",
-                "W55-5ujkqBxE:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:01",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:01",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "W55-a6ryg5ar:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'TEST': 1, 'total': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "W55-2w91GRYj:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "W55-BbbN06b0:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "W55-4knFAG75:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "W55-6bR1tuNh:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "W55-wYNYwYgH:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:02",
-                "TODO_BEFORE_ST_4_202 requests ['TRANSACTIONUPDATE'] requesttypes ('TRANSACTIONUPDATE',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-q6Fepa99:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-hm45fq3f:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 2, 'ST5PPRO': 2}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-bwBv9HY3:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-yc5N13vH:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-vfekR4kT:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-eB3x96Ra:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'BARCLAYS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'AUTH',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-pfqRf0Qk:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'PAYSAFE': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-v08A0j4R:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-pf4ce1Af:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests ['RISKDEC2'] requesttypes ('RISKDEC2',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-0b8nF5vw:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'STFS': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "W55-GEY370H1:55-0-0    TODO_BEFORE_ST_4_200 performTransactionQuery Acquirer query limit=500 count: {'total': 1, 'HSBC': 1}",
-            ),
-            todo_event(
-                "2026-02-02 00:00:03",
-                "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
-            ),
-        ];
-        events.iter_mut().for_each(|f| f.set_id(TEST_ID));
-        assert_eq!(events, expected);
-    }
-
-    #[test]
-    fn test_create_gateway_parsers() {
-        let parsers = create_gateway_parsers();
-        let parser = parsers[0].clone();
-        let Parser::Span(req) = &parser else {
-            panic!("expected gateway_request to be a Span parser");
-        };
-        assert_eq!(req.name, "gateway_request");
-        assert_eq!(req.timestamp_format, "%Y-%m-%d %H:%M:%S");
-        assert_eq!(
-            req.start_pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+InHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)"
-        );
-        assert_eq!(
-            req.end_pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+Return (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s"
-        );
-        assert_eq!(req.reference_fields, &["requestreference"]);
-        assert_eq!(req.nested.len(), 1);
-
-        let Parser::Span(txn) = &req.nested[0] else {
-            panic!("expected gateway_transaction to be a Span parser");
-        };
-        assert_eq!(txn.name, "gateway_transaction");
-        assert_eq!(txn.timestamp_format, "%Y-%m-%d %H:%M:%S");
-        assert_eq!(
-            txn.start_pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+Bgn:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)"
-        );
-        assert_eq!(
-            txn.end_pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+End:\s+(?P<interface>\S+)\s+(?P<requesttypedescription>\S+)\s+(?P<accounttypedescription>\S+)\s+(?P<sitereference>\S+)\s+(?P<paymenttypedescription>\S+)\s+(?P<currencyiso3a>\S+)\s+(?P<mainamount>\S+)\s+Status:(?P<status>\S+)\s+E:(?P<errorcode>\S+)"
-        );
-        assert_eq!(
-            txn.reference_fields,
-            &["requestreference", "transactionreference"]
-        );
-        assert_eq!(txn.nested.len(), 2);
-
-        let Parser::Single(txn_req) = &txn.nested[0] else {
-            panic!("expected gateway_transaction_request to be a Single parser");
-        };
-        assert_eq!(txn_req.name, "gateway_transaction_request");
-        assert_eq!(txn_req.timestamp_format, "%Y-%m-%d %H:%M:%S");
-        assert_eq!(
-            txn_req.pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+REQ:(?P<encrypted_request>\S+)"
-        );
-
-        let Parser::Single(txn_res) = &txn.nested[1] else {
-            panic!("expected gateway_transaction_response to be a Single parser");
-        };
-        assert_eq!(txn_res.name, "gateway_transaction_response");
-        assert_eq!(txn_res.timestamp_format, "%Y-%m-%d %H:%M:%S");
-        assert_eq!(
-            txn_res.pattern.as_str(),
-            r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+):(?P<transactionreference>\S+)\s+RES:(?P<encrypted_response>\S+)"
-        );
-    }
-
-    // ---- Additional imports for unit tests below ----
-    use regex::Regex;
-    use rstest::rstest;
-
-    // ---- TOML fixtures ----
 
     const SINGLE_VALID: &str = r#"
 type = "single"
@@ -650,8 +350,6 @@ reference_fields = ["ref"]
 nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S+)', timestamp_format = "%Y" }]
 "#;
 
-    // ---- extract_timestamp ----
-
     #[rstest]
     #[case("2026-01-15 08:30:00", "%Y-%m-%d %H:%M:%S",
         Some(NaiveDateTime::parse_from_str("2026-01-15 08:30:00", "%Y-%m-%d %H:%M:%S").unwrap()))]
@@ -674,8 +372,6 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S
     ) {
         assert_eq!(extract_timestamp(ts, fmt), expected);
     }
-
-    // ---- extract_data ----
 
     #[rstest]
     #[case(r"(?P<level>\w+)", "INFO", vec![("level", "INFO")])]
@@ -701,8 +397,6 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S
             .collect();
         assert_eq!(actual, expected_map);
     }
-
-    // ---- parse_and_validate_str ----
 
     #[rstest]
     #[case(r#"name = "foo""#, "name", "foo")]
@@ -735,8 +429,6 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S
         );
     }
 
-    // ---- extract_config_type ----
-
     #[rstest]
     #[case(r#"type = "span""#, "span")]
     #[case(r#"type = "single""#, "single")]
@@ -758,8 +450,6 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S
             err.to_string()
         );
     }
-
-    // ---- validate_required_pattern_fields ----
 
     #[rstest]
     #[case(r"(?P<timestamp>\d+) (?P<level>\w+)", vec!["timestamp", "level"])]
@@ -788,8 +478,6 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S
             err.to_string()
         );
     }
-
-    // ---- from_toml — Single parser ----
 
     #[test]
     fn test_from_toml_single_valid() {
@@ -852,8 +540,6 @@ pattern = '(?P<level>\w+)'"#,
             err.to_string()
         );
     }
-
-    // ---- from_toml — Span parser ----
 
     #[test]
     fn test_from_toml_span_valid() {
@@ -948,8 +634,6 @@ reference_fields = ["ref"]"#,
         );
     }
 
-    // ---- parse_nested (tested via from_toml on span configs) ----
-
     #[rstest]
     #[case(SPAN_VALID, 0)] // no nested key
     #[case(SPAN_EMPTY_NESTED, 0)] // nested = []
@@ -1037,8 +721,6 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestam
         };
         assert_eq!(nested.timestamp_format, "%Y");
     }
-
-    // ---- reference_fields inheritance ----
 
     #[test]
     fn test_top_level_span_requires_reference_fields() {
@@ -1179,8 +861,6 @@ nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?
             "expected error mentioning 'ref', got: {err}"
         );
     }
-
-    // ---- Parser::name() and Parser::timestamp_format() ----
 
     #[rstest]
     #[case(SINGLE_VALID, "my_parser", "%Y-%m-%d %H:%M:%S")]
