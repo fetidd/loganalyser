@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use regex::Regex;
 
 use crate::event::Event;
@@ -16,21 +14,12 @@ impl InternalSingleParser {
         let mut events = vec![];
         for line in input.lines() {
             if let Some(captures) = self.pattern.captures(line) {
-                let Ok(timestamp) = chrono::NaiveDateTime::parse_from_str(
-                    &captures["timestamp"],
-                    &self.timestamp_format,
-                ) else {
+                let Some(timestamp) = super::extract_timestamp(&captures["timestamp"], &self.timestamp_format) else {
                     // TODO do we want to log here? Error?
                     continue;
                 };
-                let mut data = HashMap::new();
-                for field in self.pattern.capture_names() {
-                    if let Some(field) = field
-                        && let Some(value) = captures.name(field)
-                    {
-                        data.insert(field.to_owned(), value.as_str().to_owned());
-                    }
-                }
+                let mut capture_names = self.pattern.capture_names();
+                let data = super::extract_data(&mut capture_names, &captures);
                 events.push(Event::new_single(&self.name, timestamp, data));
             }
         }
@@ -42,6 +31,7 @@ impl InternalSingleParser {
 mod tests {
     use chrono::NaiveDateTime;
     use regex::Regex;
+    use rstest::rstest;
 
     use crate::event::Event;
     use crate::parser::tests::TEST_ID;
@@ -61,50 +51,38 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_single_parse() {
-        for (pattern, log, expected) in [
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
-                "2026-01-01 12:34:56",
-                vec![test_single(&[], "2026-01-01 12:34:56")],
-            ),
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.+)",
-                "2026-03-05 08:00:00 INFO Server started",
-                vec![test_single(
-                    &[("level", "INFO"), ("message", "Server started")],
-                    "2026-03-05 08:00:00",
-                )],
-            ),
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<user>\S+) (?P<action>\S+)",
-                "not a log line\n2026-06-15 09:30:00 alice LOGIN\n2026-06-15 09:30:02 steve LOGIN\nskipped line",
-                vec![
-                    test_single(
-                        &[("user", "alice"), ("action", "LOGIN")],
-                        "2026-06-15 09:30:00",
-                    ),
-                    test_single(
-                        &[("user", "steve"), ("action", "LOGIN")],
-                        "2026-06-15 09:30:02",
-                    ),
-                ],
-            ),
-            (
-                r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
-                "",
-                vec![],
-            ),
-        ] {
-            let mut parser = InternalSingleParser {
-                name: "test".into(),
-                pattern: Regex::new(pattern).unwrap(),
-                timestamp_format: TS_FMT.into(),
-            };
-            let mut actual = parser.parse(log);
-            actual.iter_mut().for_each(|f| f.set_id(TEST_ID));
-            assert_eq!(actual, expected);
-        }
+    #[rstest]
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+        "2026-01-01 12:34:56",
+        vec![test_single(&[], "2026-01-01 12:34:56")],
+    )]
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.+)",
+        "2026-03-05 08:00:00 INFO Server started",
+        vec![test_single(&[("level", "INFO"), ("message", "Server started")], "2026-03-05 08:00:00")],
+    )]
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<user>\S+) (?P<action>\S+)",
+        "not a log line\n2026-06-15 09:30:00 alice LOGIN\n2026-06-15 09:30:02 steve LOGIN\nskipped line",
+        vec![
+            test_single(&[("user", "alice"), ("action", "LOGIN")], "2026-06-15 09:30:00"),
+            test_single(&[("user", "steve"), ("action", "LOGIN")], "2026-06-15 09:30:02"),
+        ],
+    )]
+    #[case(
+        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
+        "",
+        vec![],
+    )]
+    fn test_single_parse(#[case] pattern: &str, #[case] log: &str, #[case] expected: Vec<Event>) {
+        let mut parser = InternalSingleParser {
+            name: "test".into(),
+            pattern: Regex::new(pattern).unwrap(),
+            timestamp_format: TS_FMT.into(),
+        };
+        let mut actual = parser.parse(log);
+        actual.iter_mut().for_each(|f| f.set_id(TEST_ID));
+        assert_eq!(actual, expected);
     }
 }

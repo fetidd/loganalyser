@@ -1,7 +1,9 @@
 mod single;
 mod span;
 
-use regex::Regex;
+use std::collections::HashMap;
+
+use regex::{CaptureNames, Captures, Regex};
 
 pub use single::InternalSingleParser;
 pub use span::InternalSpanParser;
@@ -53,7 +55,8 @@ impl Parser {
             "single" => Self::build_single,
             _ => todo!(),
         };
-        builder(t, Self::parse_and_validate_str("name", t)?, ts_fmt)
+        let name = Self::parse_and_validate_str("name", t)?;
+        builder(t, name, ts_fmt)
     }
 
     fn parse_and_validate_str<'a>(field: &str, t: &'a toml::Table) -> LogParserResult<&'a str> {
@@ -76,8 +79,7 @@ impl Parser {
             })
             .collect::<Result<Vec<String>, LogParserError>>()?;
         let mut nested_parsers = vec![];
-        let nested = t.get("nested");
-        if let Some(nested) = nested {
+        if let Some(nested) = t.get("nested") {
             if let Some(nested) = nested.as_array() {
                 for value in nested {
                     let table = value
@@ -164,16 +166,34 @@ impl Parser {
     }
 }
 
+pub(super) fn extract_timestamp(ts: &str, timestamp_format: &str) -> Option<chrono::NaiveDateTime> {
+    chrono::NaiveDateTime::parse_from_str(ts, timestamp_format).ok()
+}
+
+pub(super) fn extract_data(
+    capture_names: &mut CaptureNames,
+    captures: &Captures,
+) -> HashMap<String, String> {
+    let mut data = HashMap::new();
+    for field in capture_names {
+        if let Some(field) = field
+            && let Some(value) = captures.name(field)
+        {
+            data.insert(field.to_owned(), value.as_str().to_owned());
+        }
+    }
+    data
+}
+
 fn error(msg: &str) -> LogParserError {
     LogParserError::ConfigParseError(msg.to_string())
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{cell::LazyCell, collections::HashMap};
+    use std::collections::HashMap;
 
-    use chrono::{Duration, NaiveDateTime};
-    use uuid::Uuid;
+    use chrono::NaiveDateTime;
 
     use super::*;
 
@@ -436,7 +456,7 @@ pub(crate) mod tests {
                 "TODO_BEFORE_ST_4_202 requests [None] requesttypes (u'TRANSACTIONQUERY',)",
             ),
         ];
-        events.iter_mut().for_each(|f| f.set_id(TEST_ID.clone()));
+        events.iter_mut().for_each(|f| f.set_id(TEST_ID));
         assert_eq!(events, expected);
     }
 
