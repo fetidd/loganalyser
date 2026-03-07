@@ -144,14 +144,14 @@ mod tests {
 
     fn test_span(data: &[(&str, &str)], timestamp: &str, duration: i64) -> Event {
         let (ts, data_map) = common_test_data(data, timestamp);
-        Event::Span {
-            name: "test".into(),
-            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
-            data: data_map,
-            duration: Duration::new(duration, 0).unwrap(),
-            id: TEST_ID,
-            parent_id: None,
-        }
+        let mut e = Event::new_span(
+            "test",
+            NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
+            data_map,
+            Duration::new(duration, 0).unwrap(),
+        );
+        e.set_id(TEST_ID);
+        e
     }
 
     #[rstest]

@@ -98,24 +98,15 @@ mod tests {
     }
 
     fn make_single(id: Uuid) -> Event {
-        Event::Single {
-            id,
-            name: "p".into(),
-            timestamp: ts(),
-            data: HashMap::new(),
-            parent_id: None,
-        }
+        let mut e = Event::new_single("p", ts(), HashMap::new());
+        e.set_id(id);
+        e
     }
 
     fn make_span(id: Uuid) -> Event {
-        Event::Span {
-            id,
-            name: "p".into(),
-            timestamp: ts(),
-            data: HashMap::new(),
-            duration: Duration::seconds(1),
-            parent_id: None,
-        }
+        let mut e = Event::new_span("p", ts(), HashMap::new(), Duration::seconds(1));
+        e.set_id(id);
+        e
     }
 
     #[rstest]

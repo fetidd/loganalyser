@@ -43,13 +43,13 @@ mod tests {
 
     fn test_single(data: &[(&str, &str)], timestamp: &str) -> Event {
         let (ts, data_map) = common_test_data(data, timestamp);
-        Event::Single {
-            name: "test".into(),
-            timestamp: NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
-            data: data_map,
-            id: TEST_ID,
-            parent_id: None,
-        }
+        let mut e = Event::new_single(
+            "test",
+            NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
+            data_map,
+        );
+        e.set_id(TEST_ID);
+        e
     }
 
     #[rstest]

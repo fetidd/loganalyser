@@ -259,16 +259,16 @@ pub(crate) mod tests {
     use super::*;
 
     fn todo_event(timestamp: &str, todo: &str) -> Event {
-        Event::Single {
-            name: "gateway_todos".into(),
-            timestamp: NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S").unwrap(),
-            data: HashMap::from([
+        let mut e = Event::new_single(
+            "gateway_todos",
+            NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S").unwrap(),
+            HashMap::from([
                 ("timestamp".into(), timestamp.into()),
                 ("todo".into(), todo.into()),
             ]),
-            id: TEST_ID,
-            parent_id: None,
-        }
+        );
+        e.set_id(TEST_ID);
+        e
     }
 
     pub(crate) fn common_test_data(
