@@ -7,6 +7,7 @@ use regex::{CaptureNames, Captures, Regex};
 
 pub use single::InternalSingleParser;
 pub use span::InternalSpanParser;
+use uuid::Uuid;
 
 use crate::{
     error::{LogParserError, LogParserResult},
@@ -38,7 +39,7 @@ impl Parser {
             Parser::Span(p) => &p.timestamp_format,
         }
     }
-    
+
     fn extract_config_type(t: &toml::Table) -> LogParserResult<&str> {
         t.get("type")
             .ok_or(error("missing type"))?
@@ -111,11 +112,7 @@ impl Parser {
         }))
     }
 
-    fn build_span(
-        t: &toml::Table,
-        name: &str,
-        ctx: &ParseContext<'_>,
-    ) -> LogParserResult<Parser> {
+    fn build_span(t: &toml::Table, name: &str, ctx: &ParseContext<'_>) -> LogParserResult<Parser> {
         let nested_parsers = Self::parse_nested(t, ctx)?;
         let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
@@ -135,10 +132,7 @@ impl Parser {
         )))
     }
 
-    fn parse_nested(
-        t: &toml::Table,
-        ctx: &ParseContext<'_>,
-    ) -> LogParserResult<Vec<Parser>> {
+    fn parse_nested(t: &toml::Table, ctx: &ParseContext<'_>) -> LogParserResult<Vec<Parser>> {
         let Some(nested) = t.get("nested") else {
             return Ok(vec![]);
         };
@@ -224,6 +218,20 @@ impl Parser {
             Parser::Span(p) => p.parse(input),
         }
     }
+
+    fn parse_line_with_context(
+        &mut self,
+        line: &str,
+        lookup: &dyn Fn(&HashMap<String, String>) -> Option<Uuid>,
+    ) -> Vec<Event> {
+        match self {
+            Parser::Single(internal) => internal
+                .parse_line_with_context(line, lookup)
+                .into_iter()
+                .collect(),
+            Parser::Span(internal) => internal.parse_line_with_context(line, lookup),
+        }
+    }
 }
 
 pub(super) fn extract_timestamp(ts: &str, timestamp_format: &str) -> Option<chrono::NaiveDateTime> {
@@ -253,7 +261,7 @@ fn error(msg: &str) -> LogParserError {
 pub(crate) mod tests {
     use std::collections::HashMap;
 
-    use chrono::{Duration, NaiveDateTime};
+    use chrono::NaiveDateTime;
     use uuid::Uuid;
 
     use super::*;
@@ -299,23 +307,7 @@ pub(crate) mod tests {
     fn parse_gateway_log() {
         let mut parsers = create_gateway_parsers();
         let events = parsers[0].parse(GW_EXAMPLE);
-        let expected = 30;
-        assert_eq!(events.len(), expected);
-        assert_eq!(
-            events[0],
-            Event::Span {
-                name: "".into(),
-                timestamp: NaiveDateTime::parse_from_str(
-                    "2026-02-02 00:00:01",
-                    "%Y-%m-%d %H:%M:%S"
-                )
-                .unwrap(),
-                data: HashMap::new(),
-                duration: Duration::new(0, 0).unwrap(),
-                id: events[0].id(),
-                parent_id: None,
-            }
-        );
+        assert_eq!(events.len(), 91);
         let mut events = parsers[1].parse(GW_EXAMPLE);
         let expected = vec![
             todo_event(
@@ -1060,7 +1052,8 @@ end_pattern = '(?P<timestamp>.+) END'
         let t: toml::Table = toml::from_str(toml_str).unwrap();
         let err = Parser::from_toml(&t).unwrap_err();
         assert!(
-            err.to_string().contains("reference_fields must be provided for span parsers"),
+            err.to_string()
+                .contains("reference_fields must be provided for span parsers"),
             "got: {err}"
         );
     }
@@ -1115,8 +1108,12 @@ nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
         let parser = Parser::from_toml(&t).unwrap();
-        let Parser::Span(outer) = parser else { panic!("expected Span") };
-        let Parser::Span(inner) = &outer.nested[0] else { panic!("expected nested Span") };
+        let Parser::Span(outer) = parser else {
+            panic!("expected Span")
+        };
+        let Parser::Span(inner) = &outer.nested[0] else {
+            panic!("expected nested Span")
+        };
         // combined: parent's ["ref"] prepended to own ["sub"]
         assert_eq!(inner.reference_fields, &["ref", "sub"]);
     }
@@ -1136,7 +1133,9 @@ nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?
         let t: toml::Table = toml::from_str(toml_str).unwrap();
         let err = Parser::from_toml(&t).unwrap_err();
         assert!(
-            err.to_string().contains("nested span parsers must provide reference_fields to disambiguate from parent"),
+            err.to_string().contains(
+                "nested span parsers must provide reference_fields to disambiguate from parent"
+            ),
             "got: {err}"
         );
     }

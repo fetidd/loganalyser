@@ -60,7 +60,7 @@ impl Event {
         }
     }
 
-    fn with_parent(mut self, parent_id: Uuid) -> Self {
+    pub fn with_parent(mut self, parent_id: Uuid) -> Self {
         match &mut self {
             Event::Span { parent_id: p, .. } | Event::Single { parent_id: p, .. } => {
                 *p = Some(parent_id);

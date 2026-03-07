@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use regex::Regex;
+use uuid::Uuid;
 
 use crate::event::Event;
 
@@ -15,6 +18,29 @@ impl InternalSingleParser {
             .lines()
             .filter_map(|line| self.parse_line(line))
             .collect()
+    }
+
+    pub(super) fn parse_line_with_context(
+        &mut self,
+        input: &str,
+        lookup: &dyn Fn(&HashMap<String, String>) -> Option<Uuid>,
+    ) -> Option<Event> {
+        if let Some(captures) = self.pattern.captures(input) {
+            let Some(timestamp) =
+                super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
+            else {
+                return None;
+            };
+            let mut capture_names = self.pattern.capture_names();
+            let data = super::extract_data(&mut capture_names, &captures);
+            let parent_id = lookup(&data);
+            let mut event = Event::new_single(&self.name, timestamp, data);
+            if let Some(pid) = parent_id {
+                event = event.with_parent(pid);
+            }
+            return Some(event);
+        }
+        None
     }
 
     pub(super) fn parse_line(&mut self, input: &str) -> Option<Event> {
