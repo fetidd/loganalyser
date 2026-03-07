@@ -78,26 +78,7 @@ impl Parser {
                 None => Err(error("reference_fields elements must be strings")),
             })
             .collect::<Result<Vec<String>, LogParserError>>()?;
-        let mut nested_parsers = vec![];
-        if let Some(nested) = t.get("nested") {
-            if let Some(nested) = nested.as_array() {
-                for value in nested {
-                    let table = value
-                        .as_table()
-                        .ok_or(error("nested elements must be toml tables"))?;
-                    let nested_ts = match table.get("timestamp_format") {
-                        Some(found) => found
-                            .as_str()
-                            .ok_or(error("timestamp_format was not a string"))?,
-                        None => timestamp_format,
-                    };
-                    let parser = Self::from_toml_table_and_timestamp_format(table, nested_ts)?;
-                    nested_parsers.push(parser);
-                }
-            } else {
-                return Err(error("nested should be an array"));
-            }
-        }
+        let nested_parsers = Self::parse_nested(t, timestamp_format)?;
         let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
         for pattern in [&start_pattern, &end_pattern] {
@@ -117,6 +98,28 @@ impl Parser {
             nested_parsers,
             reference_fields,
         )))
+    }
+
+    fn parse_nested(t: &toml::Table, timestamp_format: &str) -> LogParserResult<Vec<Parser>> {
+        let Some(nested) = t.get("nested") else {
+            return Ok(vec![]);
+        };
+        let nested = nested.as_array().ok_or(error("nested should be an array"))?;
+        nested
+            .iter()
+            .map(|value| {
+                let table = value
+                    .as_table()
+                    .ok_or(error("nested elements must be toml tables"))?;
+                let nested_ts = match table.get("timestamp_format") {
+                    Some(found) => found
+                        .as_str()
+                        .ok_or(error("timestamp_format was not a string"))?,
+                    None => timestamp_format,
+                };
+                Self::from_toml_table_and_timestamp_format(table, nested_ts)
+            })
+            .collect()
     }
 
     fn validate_required_pattern_fields(
