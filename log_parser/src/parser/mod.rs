@@ -13,6 +13,11 @@ use crate::{
     event::Event,
 };
 
+struct ParseContext<'a> {
+    timestamp_format: &'a str,
+    reference_fields: Option<&'a [String]>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Parser {
     Single(InternalSingleParser),
@@ -43,43 +48,41 @@ impl Parser {
 
     pub fn from_toml(t: &toml::Table) -> LogParserResult<Parser> {
         let config_type = Self::extract_config_type(t)?;
-        let reference_fields = if let Some(reference_fields) = t.get("reference_fields") {
-            reference_fields
-                .as_array()
-                .ok_or(error("reference_fields not an array"))?
-                .into_iter()
-                .map(|v| match v.as_str() {
-                    Some(s) => Ok(s.to_owned()),
-                    None => Err(error("reference_fields elements must be strings")),
-                })
-                .collect::<Result<Vec<String>, LogParserError>>()?
-                .into()
-        } else if config_type == "span" {
-            return Err(error("reference_fields must be provided for span parsers"));
-        } else {
-            None
+        let reference_fields: Option<Vec<String>> =
+            if let Some(reference_fields) = t.get("reference_fields") {
+                reference_fields
+                    .as_array()
+                    .ok_or(error("reference_fields not an array"))?
+                    .into_iter()
+                    .map(|v| match v.as_str() {
+                        Some(s) => Ok(s.to_owned()),
+                        None => Err(error("reference_fields elements must be strings")),
+                    })
+                    .collect::<Result<Vec<String>, LogParserError>>()?
+                    .into()
+            } else if config_type == "span" {
+                return Err(error("reference_fields must be provided for span parsers"));
+            } else {
+                None
+            };
+        let ctx = ParseContext {
+            timestamp_format: Self::parse_and_validate_str("timestamp_format", t)?,
+            reference_fields: reference_fields.as_deref(),
         };
-        Self::from_toml_table_and_parts(
-            t,
-            config_type,
-            Self::parse_and_validate_str("timestamp_format", t)?,
-            reference_fields,
-        )
+        Self::from_toml_table_and_parts(t, config_type, &ctx)
     }
 
     fn from_toml_table_and_parts(
         t: &toml::Table,
         config_type: &str,
-        ts_fmt: &str,
-        reference_fields: Option<Vec<String>>,
+        ctx: &ParseContext<'_>,
     ) -> LogParserResult<Parser> {
-        let builder = match config_type {
-            "span" => Self::build_span,
-            "single" => Self::build_single,
-            _ => todo!(),
-        };
         let name = Self::parse_and_validate_str("name", t)?;
-        builder(t, name, ts_fmt, reference_fields)
+        match config_type {
+            "span" => Self::build_span(t, name, ctx),
+            "single" => Self::build_single(t, name, ctx),
+            _ => todo!(),
+        }
     }
 
     fn parse_and_validate_str<'a>(field: &str, t: &'a toml::Table) -> LogParserResult<&'a str> {
@@ -94,50 +97,47 @@ impl Parser {
     fn build_single(
         t: &toml::Table,
         name: &str,
-        timestamp_format: &str,
-        reference_fields: Option<Vec<String>>,
+        ctx: &ParseContext<'_>,
     ) -> LogParserResult<Parser> {
         let pattern = Regex::new(Self::parse_and_validate_str("pattern", t)?.into())?;
         Self::validate_required_pattern_fields(&pattern, Self::REQUIRED_FIELDS)?;
-        if let Some(reference_fields) = reference_fields {
-            Self::validate_required_pattern_fields(&pattern, &reference_fields)?;
+        if let Some(reference_fields) = ctx.reference_fields {
+            Self::validate_required_pattern_fields(&pattern, reference_fields)?;
         }
         Ok(Parser::Single(InternalSingleParser {
             name: name.into(),
             pattern,
-            timestamp_format: timestamp_format.into(),
+            timestamp_format: ctx.timestamp_format.into(),
         }))
     }
 
     fn build_span(
         t: &toml::Table,
         name: &str,
-        timestamp_format: &str,
-        reference_fields: Option<Vec<String>>,
+        ctx: &ParseContext<'_>,
     ) -> LogParserResult<Parser> {
-        let nested_parsers = Self::parse_nested(t, timestamp_format, &reference_fields)?;
+        let nested_parsers = Self::parse_nested(t, ctx)?;
         let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
         for pattern in [&start_pattern, &end_pattern] {
             Self::validate_required_pattern_fields(pattern, Self::REQUIRED_FIELDS)?;
-            if let Some(reference_fields) = &reference_fields {
-                Self::validate_required_pattern_fields(&pattern, reference_fields)?;
+            if let Some(reference_fields) = ctx.reference_fields {
+                Self::validate_required_pattern_fields(pattern, reference_fields)?;
             }
         }
         Ok(Parser::Span(InternalSpanParser::new(
             name.into(),
-            timestamp_format.into(),
+            ctx.timestamp_format.into(),
             start_pattern,
             end_pattern,
             nested_parsers,
-            reference_fields.unwrap_or(vec![]),
+            ctx.reference_fields.map(|r| r.to_vec()).unwrap_or_default(),
         )))
     }
 
     fn parse_nested(
         t: &toml::Table,
-        timestamp_format: &str,
-        parent_reference_fields: &Option<Vec<String>>,
+        ctx: &ParseContext<'_>,
     ) -> LogParserResult<Vec<Parser>> {
         let Some(nested) = t.get("nested") else {
             return Ok(vec![]);
@@ -155,13 +155,11 @@ impl Parser {
                     Some(found) => found
                         .as_str()
                         .ok_or(error("timestamp_format was not a string"))?,
-                    None => timestamp_format,
+                    None => ctx.timestamp_format,
                 };
                 let config_type = Self::extract_config_type(table)?;
-                let mut reference_fields = vec![];
-                if let Some(parent_reference_fields) = parent_reference_fields {
-                    reference_fields.extend(parent_reference_fields.iter().cloned());
-                }
+                let mut reference_fields: Vec<String> =
+                    ctx.reference_fields.map(|r| r.to_vec()).unwrap_or_default();
                 if let Some(nested_ref_fields) = table.get("reference_fields") {
                     let own_fields: Vec<String> = nested_ref_fields
                         .as_array()
@@ -188,7 +186,11 @@ impl Parser {
                         "nested span parsers must provide reference_fields to disambiguate from parent",
                     ));
                 };
-                Self::from_toml_table_and_parts(table, config_type, nested_ts, Some(reference_fields))
+                let nested_ctx = ParseContext {
+                    timestamp_format: nested_ts,
+                    reference_fields: Some(&reference_fields),
+                };
+                Self::from_toml_table_and_parts(table, config_type, &nested_ctx)
             })
             .collect()
     }
