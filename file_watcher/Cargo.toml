@@ -1,0 +1,9 @@
+[package]
+name = "file_watcher"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+log_parser = { path = "../log_parser" }
+tokio = "1.50.0"
+toml = "1.0.6"
