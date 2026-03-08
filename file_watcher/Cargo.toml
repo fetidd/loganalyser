@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 log_parser = { path = "../log_parser" }
+shared = { path = "../shared" }
+log_storage = { path = "../log_storage" }
 tokio = "1.50.0"
 toml = "1.0.6"

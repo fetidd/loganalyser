@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use uuid::Uuid;
 
-use crate::event::Event;
+use shared::event::Event;
 
 #[derive(Debug, Clone)]
 pub struct InternalSingleParser {
@@ -65,11 +65,17 @@ mod tests {
     use regex::Regex;
     use rstest::rstest;
 
-    use crate::event::Event;
+    use shared::event::Event;
     use crate::parser::tests::TEST_ID;
 
     use super::super::tests::common_test_data;
     use super::*;
+
+    fn set_id(event: &mut Event, id: uuid::Uuid) {
+        match event {
+            Event::Span { id: eid, .. } | Event::Single { id: eid, .. } => *eid = id,
+        }
+    }
 
     const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
 
@@ -80,7 +86,7 @@ mod tests {
             NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data_map,
         );
-        e.set_id(TEST_ID);
+        set_id(&mut e, TEST_ID);
         e
     }
 
@@ -125,7 +131,7 @@ mod tests {
             timestamp_format: TS_FMT.into(),
         };
         let mut actual = parser.parse(log);
-        actual.iter_mut().for_each(|f| f.set_id(TEST_ID));
+        actual.iter_mut().for_each(|f| set_id(f, TEST_ID));
         assert_eq!(actual, expected);
     }
 
@@ -156,7 +162,7 @@ mod tests {
         let actual = parser.parse_line(line);
         if [&actual, &expected].into_iter().all(Option::is_some) {
             let (mut actual, expected) = (actual.unwrap(), expected.unwrap());
-            actual.set_id(TEST_ID);
+            set_id(&mut actual, TEST_ID);
             assert_eq!(actual, expected);
         } else if ![&actual, &expected].into_iter().all(Option::is_none) {
             panic!("{actual:?} != {expected:?}");

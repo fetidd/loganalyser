@@ -69,13 +69,6 @@ impl Event {
         self
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_id(&mut self, new_id: Uuid) {
-        match self {
-            Event::Span { id, .. } => *id = new_id,
-            Event::Single { id, .. } => *id = new_id,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -91,7 +84,6 @@ mod tests {
     const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
     const ID_A: Uuid = Uuid::from_u128(1);
     const ID_B: Uuid = Uuid::from_u128(2);
-    const NEW_ID: Uuid = Uuid::from_u128(99);
 
     fn ts() -> NaiveDateTime {
         NaiveDateTime::parse_from_str(TS_STR, TS_FMT).unwrap()
@@ -99,13 +91,15 @@ mod tests {
 
     fn make_single(id: Uuid) -> Event {
         let mut e = Event::new_single("p", ts(), HashMap::new());
-        e.set_id(id);
+        let Event::Single { id: ref mut eid, .. } = e else { unreachable!() };
+        *eid = id;
         e
     }
 
     fn make_span(id: Uuid) -> Event {
         let mut e = Event::new_span("p", ts(), HashMap::new(), Duration::seconds(1));
-        e.set_id(id);
+        let Event::Span { id: ref mut eid, .. } = e else { unreachable!() };
+        *eid = id;
         e
     }
 
@@ -114,14 +108,6 @@ mod tests {
     #[case(make_span(ID_B), ID_B)]
     fn test_event_id(#[case] event: Event, #[case] expected_id: Uuid) {
         assert_eq!(event.id(), expected_id);
-    }
-
-    #[rstest]
-    #[case(make_single(ID_A))]
-    #[case(make_span(ID_A))]
-    fn test_set_id(#[case] mut event: Event) {
-        event.set_id(NEW_ID);
-        assert_eq!(event.id(), NEW_ID);
     }
 
     #[test]

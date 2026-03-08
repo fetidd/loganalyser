@@ -1,6 +1,8 @@
-use std::{collections::HashMap, env, fs, process};
+use std::{collections::HashMap, env, fs};
 
-use log_parser::{event::Event, parser::Parser};
+use anyhow::{Context, bail};
+use log_parser::parser::Parser;
+use shared::event::Event;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -88,53 +90,36 @@ fn attach_children(
     event
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 4 {
-        eprintln!("Usage: {} <log_file> <config_file> <output_file>", args[0]);
-        process::exit(1);
+        bail!("Usage: {} <log_file> <config_file> <output_file>", args[0]);
     }
 
     let log_path = &args[1];
     let config_path = &args[2];
     let output_path = &args[3];
 
-    let log_content = fs::read_to_string(log_path).unwrap_or_else(|e| {
-        eprintln!("Failed to read log file '{log_path}': {e}");
-        process::exit(1);
-    });
+    let log_content = fs::read_to_string(log_path)
+        .with_context(|| format!("Failed to read log file '{log_path}'"))?;
 
-    let config_content = fs::read_to_string(config_path).unwrap_or_else(|e| {
-        eprintln!("Failed to read config file '{config_path}': {e}");
-        process::exit(1);
-    });
+    let config_content = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read config file '{config_path}'"))?;
 
-    let config: toml::Table = config_content.parse().unwrap_or_else(|e| {
-        eprintln!("Failed to parse config '{config_path}': {e}");
-        process::exit(1);
-    });
+    let config: toml::Table = config_content
+        .parse()
+        .with_context(|| format!("Failed to parse config '{config_path}'"))?;
 
     let parsers_array = config
         .get("parsers")
         .and_then(|v| v.as_array())
-        .unwrap_or_else(|| {
-            eprintln!("Config missing [[parsers]] array");
-            process::exit(1);
-        });
+        .context("Config missing [[parsers]] array")?;
 
     let mut parsers: Vec<Parser> = parsers_array
         .iter()
-        .filter_map(|v| {
-            let table = v.as_table()?;
-            match Parser::from_toml(table) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    eprintln!("Failed to build parser: {e}");
-                    process::exit(1);
-                }
-            }
-        })
-        .collect();
+        .filter_map(|v| v.as_table())
+        .map(|table| Parser::from_toml(table).context("Failed to build parser"))
+        .collect::<anyhow::Result<_>>()?;
 
     let all_events: Vec<Event> = parsers
         .iter_mut()
@@ -143,23 +128,19 @@ fn main() {
 
     let tree = build_tree(all_events);
 
-    let json = serde_json::to_string_pretty(&tree).unwrap_or_else(|e| {
-        eprintln!("Failed to serialize events: {e}");
-        process::exit(1);
-    });
+    let json = serde_json::to_string_pretty(&tree).context("Failed to serialize events")?;
 
-    fs::write(output_path, &json).unwrap_or_else(|e| {
-        eprintln!("Failed to write output '{output_path}': {e}");
-        process::exit(1);
-    });
+    fs::write(output_path, &json)
+        .with_context(|| format!("Failed to write output '{output_path}'"))?;
 
     println!("Wrote {} top-level events to {output_path}", tree.len());
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use log_parser::event::Event;
+    use shared::event::Event;
     use std::collections::HashMap;
 
     fn ts() -> chrono::NaiveDateTime {

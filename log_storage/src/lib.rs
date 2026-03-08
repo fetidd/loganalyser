@@ -1,14 +1,22 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use shared::event::Event;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Storage error: {0}")]
+    Storage(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+pub trait EventStorage {
+    fn store(&self, events: &[Event]) -> Result<()>;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn test_new_in_memory_storage() {
+        todo!()
     }
 }

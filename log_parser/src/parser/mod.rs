@@ -9,10 +9,9 @@ pub use single::InternalSingleParser;
 pub use span::InternalSpanParser;
 use uuid::Uuid;
 
-use crate::{
-    error::{LogParserError, LogParserResult},
-    event::Event,
-};
+use shared::event::Event;
+
+use crate::error::{Error, Result};
 
 struct ParseContext<'a> {
     timestamp_format: &'a str,
@@ -40,14 +39,14 @@ impl Parser {
         }
     }
 
-    fn extract_config_type(t: &toml::Table) -> LogParserResult<&str> {
+    fn extract_config_type(t: &toml::Table) -> Result<&str> {
         t.get("type")
             .ok_or(error("missing type"))?
             .as_str()
             .ok_or(error("type was not a string"))
     }
 
-    pub fn from_toml(t: &toml::Table) -> LogParserResult<Parser> {
+    pub fn from_toml(t: &toml::Table) -> Result<Parser> {
         let config_type = Self::extract_config_type(t)?;
         let reference_fields: Option<Vec<String>> =
             if let Some(reference_fields) = t.get("reference_fields") {
@@ -59,7 +58,7 @@ impl Parser {
                         Some(s) => Ok(s.to_owned()),
                         None => Err(error("reference_fields elements must be strings")),
                     })
-                    .collect::<Result<Vec<String>, LogParserError>>()?
+                    .collect::<Result<Vec<String>>>()?
                     .into()
             } else if config_type == "span" {
                 return Err(error("reference_fields must be provided for span parsers"));
@@ -77,7 +76,7 @@ impl Parser {
         t: &toml::Table,
         config_type: &str,
         ctx: &ParseContext<'_>,
-    ) -> LogParserResult<Parser> {
+    ) -> Result<Parser> {
         let name = Self::parse_and_validate_str("name", t)?;
         match config_type {
             "span" => Self::build_span(t, name, ctx),
@@ -86,7 +85,7 @@ impl Parser {
         }
     }
 
-    fn parse_and_validate_str<'a>(field: &str, t: &'a toml::Table) -> LogParserResult<&'a str> {
+    fn parse_and_validate_str<'a>(field: &str, t: &'a toml::Table) -> Result<&'a str> {
         Ok(t.get(field)
             .ok_or(error(&format!("missing {field}")))?
             .as_str()
@@ -99,7 +98,7 @@ impl Parser {
         t: &toml::Table,
         name: &str,
         ctx: &ParseContext<'_>,
-    ) -> LogParserResult<Parser> {
+    ) -> Result<Parser> {
         let pattern = Regex::new(Self::parse_and_validate_str("pattern", t)?.into())?;
         Self::validate_required_pattern_fields(&pattern, Self::REQUIRED_FIELDS)?;
         if let Some(reference_fields) = ctx.reference_fields {
@@ -112,7 +111,7 @@ impl Parser {
         }))
     }
 
-    fn build_span(t: &toml::Table, name: &str, ctx: &ParseContext<'_>) -> LogParserResult<Parser> {
+    fn build_span(t: &toml::Table, name: &str, ctx: &ParseContext<'_>) -> Result<Parser> {
         let nested_parsers = Self::parse_nested(t, ctx)?;
         let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
@@ -132,7 +131,7 @@ impl Parser {
         )))
     }
 
-    fn parse_nested(t: &toml::Table, ctx: &ParseContext<'_>) -> LogParserResult<Vec<Parser>> {
+    fn parse_nested(t: &toml::Table, ctx: &ParseContext<'_>) -> Result<Vec<Parser>> {
         let Some(nested) = t.get("nested") else {
             return Ok(vec![]);
         };
@@ -164,7 +163,7 @@ impl Parser {
                                 .ok_or(error("reference_fields must be strings"))
                                 .map(|s| s.to_owned())
                         })
-                        .collect::<LogParserResult<_>>()?;
+                        .collect::<Result<_>>()?;
                     if config_type == "span" {
                         for field in &own_fields {
                             if reference_fields.contains(field) {
@@ -192,7 +191,7 @@ impl Parser {
     fn validate_required_pattern_fields(
         pattern: &Regex,
         fields: impl IntoIterator<Item: AsRef<str>>,
-    ) -> LogParserResult<()> {
+    ) -> Result<()> {
         let mut missing = vec![];
         for f in fields {
             if !pattern
@@ -253,8 +252,8 @@ pub(super) fn extract_data(
     data
 }
 
-fn error(msg: &str) -> LogParserError {
-    LogParserError::ConfigParseError(msg.to_string())
+fn error(msg: &str) -> Error {
+    Error::ConfigParse(msg.to_string())
 }
 
 #[cfg(test)]
