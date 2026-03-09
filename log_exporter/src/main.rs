@@ -2,8 +2,8 @@ use std::{collections::HashMap, env, fs};
 
 use anyhow::{Context, bail};
 use log_parser::parser::Parser;
-use shared::event::Event;
 use serde::Serialize;
+use shared::event::Event;
 
 #[derive(Serialize)]
 struct JsonEvent {
@@ -22,7 +22,14 @@ struct JsonEvent {
 impl JsonEvent {
     fn from_event(event: &Event) -> Self {
         match event {
-            Event::Span { id, name, timestamp, data, duration, .. } => JsonEvent {
+            Event::Span {
+                id,
+                name,
+                timestamp,
+                data,
+                duration,
+                ..
+            } => JsonEvent {
                 id: id.to_string(),
                 name: name.clone(),
                 kind: "span",
@@ -31,7 +38,13 @@ impl JsonEvent {
                 duration_ms: Some(duration.num_milliseconds()),
                 children: vec![],
             },
-            Event::Single { id, name, timestamp, data, .. } => JsonEvent {
+            Event::Single {
+                id,
+                name,
+                timestamp,
+                data,
+                ..
+            } => JsonEvent {
                 id: id.to_string(),
                 name: name.clone(),
                 kind: "single",
@@ -118,7 +131,7 @@ fn main() -> anyhow::Result<()> {
     let mut parsers: Vec<Parser> = parsers_array
         .iter()
         .filter_map(|v| v.as_table())
-        .map(|table| Parser::from_toml(table).context("Failed to build parser"))
+        .map(|table| Parser::build_from_toml(table).context("Failed to build parser"))
         .collect::<anyhow::Result<_>>()?;
 
     let all_events: Vec<Event> = parsers

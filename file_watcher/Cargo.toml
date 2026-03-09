@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 log_parser = { path = "../log_parser" }
 shared = { path = "../shared" }
-log_storage = { path = "../log_storage" }
-tokio = "1.50.0"
+event_storage = { path = "../event_storage" }
+tokio = { version = "1.50.0", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
 toml = "1.0.6"
+anyhow = "1.0.102"
+glob = "0.3"

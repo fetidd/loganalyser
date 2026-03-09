@@ -13,9 +13,10 @@ use shared::event::Event;
 
 use crate::error::{Error, Result};
 
-struct ParseContext<'a> {
+struct ParserBuildContext<'a> {
     timestamp_format: &'a str,
     reference_fields: Option<&'a [String]>,
+    parser_type: &'a str,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +47,7 @@ impl Parser {
             .ok_or(error("type was not a string"))
     }
 
-    pub fn from_toml(t: &toml::Table) -> Result<Parser> {
+    pub fn build_from_toml(t: &toml::Table) -> Result<Parser> {
         let config_type = Self::extract_config_type(t)?;
         let reference_fields: Option<Vec<String>> =
             if let Some(reference_fields) = t.get("reference_fields") {
@@ -65,20 +66,20 @@ impl Parser {
             } else {
                 None
             };
-        let ctx = ParseContext {
+        let ctx = ParserBuildContext {
             timestamp_format: Self::parse_and_validate_str("timestamp_format", t)?,
             reference_fields: reference_fields.as_deref(),
+            parser_type: config_type,
         };
-        Self::from_toml_table_and_parts(t, config_type, &ctx)
+        Self::from_toml_table_and_context(t, &ctx)
     }
 
-    fn from_toml_table_and_parts(
+    fn from_toml_table_and_context(
         t: &toml::Table,
-        config_type: &str,
-        ctx: &ParseContext<'_>,
+        ctx: &ParserBuildContext<'_>,
     ) -> Result<Parser> {
         let name = Self::parse_and_validate_str("name", t)?;
-        match config_type {
+        match ctx.parser_type {
             "span" => Self::build_span(t, name, ctx),
             "single" => Self::build_single(t, name, ctx),
             _ => todo!(),
@@ -94,11 +95,7 @@ impl Parser {
 
     const REQUIRED_FIELDS: [&str; 1] = ["timestamp"];
 
-    fn build_single(
-        t: &toml::Table,
-        name: &str,
-        ctx: &ParseContext<'_>,
-    ) -> Result<Parser> {
+    fn build_single(t: &toml::Table, name: &str, ctx: &ParserBuildContext<'_>) -> Result<Parser> {
         let pattern = Regex::new(Self::parse_and_validate_str("pattern", t)?.into())?;
         Self::validate_required_pattern_fields(&pattern, Self::REQUIRED_FIELDS)?;
         if let Some(reference_fields) = ctx.reference_fields {
@@ -111,7 +108,7 @@ impl Parser {
         }))
     }
 
-    fn build_span(t: &toml::Table, name: &str, ctx: &ParseContext<'_>) -> Result<Parser> {
+    fn build_span(t: &toml::Table, name: &str, ctx: &ParserBuildContext<'_>) -> Result<Parser> {
         let nested_parsers = Self::parse_nested(t, ctx)?;
         let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
@@ -131,7 +128,7 @@ impl Parser {
         )))
     }
 
-    fn parse_nested(t: &toml::Table, ctx: &ParseContext<'_>) -> Result<Vec<Parser>> {
+    fn parse_nested(t: &toml::Table, ctx: &ParserBuildContext<'_>) -> Result<Vec<Parser>> {
         let Some(nested) = t.get("nested") else {
             return Ok(vec![]);
         };
@@ -179,11 +176,12 @@ impl Parser {
                         "nested span parsers must provide reference_fields to disambiguate from parent",
                     ));
                 };
-                let nested_ctx = ParseContext {
+                let nested_ctx = ParserBuildContext {
                     timestamp_format: nested_ts,
                     reference_fields: Some(&reference_fields),
+                    parser_type: config_type
                 };
-                Self::from_toml_table_and_parts(table, config_type, &nested_ctx)
+                Self::from_toml_table_and_context(table, &nested_ctx)
             })
             .collect()
     }
@@ -481,7 +479,7 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+) (?P<ref>\S
     #[test]
     fn test_from_toml_single_valid() {
         let t: toml::Table = toml::from_str(SINGLE_VALID).unwrap();
-        let parser = Parser::from_toml(&t).unwrap();
+        let parser = Parser::build_from_toml(&t).unwrap();
         let Parser::Single(p) = parser else {
             panic!("expected Single")
         };
@@ -532,7 +530,7 @@ pattern = '(?P<level>\w+)'"#,
     )] // pattern missing timestamp capture group
     fn test_from_toml_single_err(#[case] toml_str: &str, #[case] expected_err: &str) {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains(expected_err),
             "expected error containing {expected_err:?}, got: {}",
@@ -543,7 +541,7 @@ pattern = '(?P<level>\w+)'"#,
     #[test]
     fn test_from_toml_span_valid() {
         let t: toml::Table = toml::from_str(SPAN_VALID).unwrap();
-        let parser = Parser::from_toml(&t).unwrap();
+        let parser = Parser::build_from_toml(&t).unwrap();
         let Parser::Span(p) = parser else {
             panic!("expected Span")
         };
@@ -625,7 +623,7 @@ reference_fields = ["ref"]"#,
     )] // reference field not in patterns
     fn test_from_toml_span_err(#[case] toml_str: &str, #[case] expected_err: &str) {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains(expected_err),
             "expected error containing {expected_err:?}, got: {}",
@@ -640,7 +638,7 @@ reference_fields = ["ref"]"#,
     #[case(SPAN_TWO_NESTED, 2)] // two nested singles
     fn test_parse_nested_count(#[case] toml_str: &str, #[case] expected_count: usize) {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let Parser::Span(p) = Parser::from_toml(&t).unwrap() else {
+        let Parser::Span(p) = Parser::build_from_toml(&t).unwrap() else {
             panic!("expected Span");
         };
         assert_eq!(p.nested.len(), expected_count);
@@ -689,7 +687,7 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestam
     )]
     fn test_parse_nested_err(#[case] toml_str: &str, #[case] expected_err: &str) {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains(expected_err),
             "expected error containing {expected_err:?}, got: {}",
@@ -700,7 +698,7 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestam
     #[test]
     fn test_nested_inherits_parent_timestamp_format() {
         let t: toml::Table = toml::from_str(SPAN_NESTED_INHERITS_TS_FMT).unwrap();
-        let Parser::Span(p) = Parser::from_toml(&t).unwrap() else {
+        let Parser::Span(p) = Parser::build_from_toml(&t).unwrap() else {
             panic!()
         };
         let Parser::Single(nested) = &p.nested[0] else {
@@ -712,7 +710,7 @@ nested = [{ type = "single", name = "n", pattern = '(?P<timestamp>.+)', timestam
     #[test]
     fn test_nested_overrides_timestamp_format() {
         let t: toml::Table = toml::from_str(SPAN_NESTED_OVERRIDES_TS_FMT).unwrap();
-        let Parser::Span(p) = Parser::from_toml(&t).unwrap() else {
+        let Parser::Span(p) = Parser::build_from_toml(&t).unwrap() else {
             panic!()
         };
         let Parser::Single(nested) = &p.nested[0] else {
@@ -731,7 +729,7 @@ start_pattern = '(?P<timestamp>.+) START'
 end_pattern = '(?P<timestamp>.+) END'
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string()
                 .contains("reference_fields must be provided for span parsers"),
@@ -752,7 +750,7 @@ reference_fields = ["ref"]
 nested = [{ type = "single", name = "inner", pattern = '(?P<timestamp>.+) (?P<ref>\S+)' }]
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        assert!(Parser::from_toml(&t).is_ok());
+        assert!(Parser::build_from_toml(&t).is_ok());
     }
 
     #[test]
@@ -768,7 +766,7 @@ reference_fields = ["ref"]
 nested = [{ type = "single", name = "inner", pattern = '(?P<timestamp>.+)' }]
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains("ref"),
             "expected error mentioning 'ref', got: {err}"
@@ -788,7 +786,7 @@ reference_fields = ["ref"]
 nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) END', reference_fields = ["sub"] }]
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let parser = Parser::from_toml(&t).unwrap();
+        let parser = Parser::build_from_toml(&t).unwrap();
         let Parser::Span(outer) = parser else {
             panic!("expected Span")
         };
@@ -812,7 +810,7 @@ reference_fields = ["ref"]
 nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) END' }]
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains(
                 "nested span parsers must provide reference_fields to disambiguate from parent"
@@ -834,7 +832,7 @@ reference_fields = ["ref"]
 nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<ref>\S+):(?P<sub>\S+) END', reference_fields = ["ref", "sub"] }]
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains("duplicates an inherited field"),
             "got: {err}"
@@ -854,7 +852,7 @@ reference_fields = ["ref"]
 nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?P<sub>\S+) START', end_pattern = '(?P<timestamp>.+) (?P<sub>\S+) END', reference_fields = ["sub"] }]
 "#;
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let err = Parser::from_toml(&t).unwrap_err();
+        let err = Parser::build_from_toml(&t).unwrap_err();
         assert!(
             err.to_string().contains("ref"),
             "expected error mentioning 'ref', got: {err}"
@@ -870,7 +868,7 @@ nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?
         #[case] expected_ts_fmt: &str,
     ) {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let parser = Parser::from_toml(&t).unwrap();
+        let parser = Parser::build_from_toml(&t).unwrap();
         assert_eq!(parser.name(), expected_name);
         assert_eq!(parser.timestamp_format(), expected_ts_fmt);
     }

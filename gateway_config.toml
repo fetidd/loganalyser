@@ -1,6 +1,6 @@
 [[parsers]]
 name = "gateway_request"
-glob = "gateway_example.log"
+glob = "/home/ben/loganalyser/gateway_example.log"
 type = "span"
 start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+InHeads:(?P<headers>\{[^\}]*\})\s+Apache:(?P<apachereference>\S+)'
 end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<requestreference>\S+)\s+Return (?P<response_bytes>\d+)bytes to client\s(?P<username>\S+)\s+(?P<time_taken>[0-9\.]+)s'
@@ -102,5 +102,6 @@ nested = [
 [[parsers]]
 name = "gateway_todos"
 type = "single"
+glob = "/home/ben/loganalyser/gateway_example*.log"
 pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<todo>.*TODO.*)'
 timestamp_format = "%Y-%m-%d %H:%M:%S"
