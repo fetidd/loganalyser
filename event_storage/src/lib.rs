@@ -1,4 +1,3 @@
-use chrono::Duration;
 use shared::event::Event;
 use thiserror::Error;
 
@@ -7,7 +6,6 @@ pub mod mysql;
 
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
-use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -36,18 +34,20 @@ pub enum SqlCmp<T> {
     Gte(T),
     Lte(T),
     Like(T),
+    In(Vec<T>),
     Json(String, Box<SqlCmp<T>>),
 }
 
 impl<T> SqlCmp<T> {
     pub fn map<U>(self, f: impl Fn(T) -> U) -> SqlCmp<U> {
         match self {
-            SqlCmp::Eq(v) => SqlCmp::Eq(f(v)),
-            SqlCmp::Gt(v) => SqlCmp::Gt(f(v)),
-            SqlCmp::Lt(v) => SqlCmp::Lt(f(v)),
-            SqlCmp::Gte(v) => SqlCmp::Gte(f(v)),
-            SqlCmp::Lte(v) => SqlCmp::Lte(f(v)),
-            SqlCmp::Like(v) => SqlCmp::Like(f(v)),
+            SqlCmp::Eq(v)          => SqlCmp::Eq(f(v)),
+            SqlCmp::Gt(v)          => SqlCmp::Gt(f(v)),
+            SqlCmp::Lt(v)          => SqlCmp::Lt(f(v)),
+            SqlCmp::Gte(v)         => SqlCmp::Gte(f(v)),
+            SqlCmp::Lte(v)         => SqlCmp::Lte(f(v)),
+            SqlCmp::Like(v)        => SqlCmp::Like(f(v)),
+            SqlCmp::In(vals)       => SqlCmp::In(vals.into_iter().map(f).collect()),
             SqlCmp::Json(k, inner) => SqlCmp::Json(k, Box::new(inner.map(f))),
         }
     }

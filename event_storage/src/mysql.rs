@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num};
+use std::collections::HashMap;
 
 use chrono::{Duration, NaiveDateTime};
 use shared::event::Event;
@@ -210,15 +210,26 @@ impl MySqlEventStore {
     fn parse_timestamp_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
         if let Some(filters) = &filter.timestamp {
             for filter in filters {
-                let (op, val) = match filter {
-                    SqlCmp::Eq(v) => ("=", v),
-                    SqlCmp::Lt(v) => ("<", v),
-                    SqlCmp::Gt(v) => (">", v),
-                    SqlCmp::Lte(v) => ("<=", v),
-                    SqlCmp::Gte(v) => (">=", v),
-                    other => panic!("timestamp can not be filtered by {other:?}"),
-                };
-                wheres.push((format!("timestamp {op} ?"), vec![val.clone().into()]));
+                match filter {
+                    SqlCmp::In(vals) => {
+                        let placeholders = vec!["?"; vals.len()].join(", ");
+                        wheres.push((
+                            format!("timestamp IN ({placeholders})"),
+                            vals.iter().map(|v| v.clone().into()).collect(),
+                        ));
+                    }
+                    other => {
+                        let (op, val) = match other {
+                            SqlCmp::Eq(v) => ("=", v),
+                            SqlCmp::Lt(v) => ("<", v),
+                            SqlCmp::Gt(v) => (">", v),
+                            SqlCmp::Lte(v) => ("<=", v),
+                            SqlCmp::Gte(v) => (">=", v),
+                            _ => panic!("timestamp can not be filtered by {other:?}"),
+                        };
+                        wheres.push((format!("timestamp {op} ?"), vec![val.clone().into()]));
+                    }
+                }
             }
         }
     }
@@ -226,35 +237,56 @@ impl MySqlEventStore {
     fn parse_duration_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
         if let Some(filters) = &filter.duration {
             for filter in filters {
-                let (op, val) = match filter {
-                    SqlCmp::Eq(v) => ("=", v),
-                    SqlCmp::Lt(v) => ("<", v),
-                    SqlCmp::Gt(v) => (">", v),
-                    SqlCmp::Lte(v) => ("<=", v),
-                    SqlCmp::Gte(v) => (">=", v),
-                    other => panic!("duration can not be filtered by {other:?}"),
-                };
-                wheres.push((
-                    format!("duration_ms {op} ?"),
-                    vec![MySqlParamValue::UnsignedNumber(*val)],
-                ));
+                match filter {
+                    SqlCmp::In(vals) => {
+                        let placeholders = vec!["?"; vals.len()].join(", ");
+                        wheres.push((
+                            format!("duration_ms IN ({placeholders})"),
+                            vals.iter()
+                                .map(|v| MySqlParamValue::UnsignedNumber(*v))
+                                .collect(),
+                        ));
+                    }
+                    other => {
+                        let (op, val) = match other {
+                            SqlCmp::Eq(v) => ("=", v),
+                            SqlCmp::Lt(v) => ("<", v),
+                            SqlCmp::Gt(v) => (">", v),
+                            SqlCmp::Lte(v) => ("<=", v),
+                            SqlCmp::Gte(v) => (">=", v),
+                            _ => panic!("duration can not be filtered by {other:?}"),
+                        };
+                        wheres.push((
+                            format!("duration_ms {op} ?"),
+                            vec![MySqlParamValue::UnsignedNumber(*val)],
+                        ));
+                    }
+                }
             }
         }
     }
 
     fn _parse_id_filter(filter: &SqlCmp<String>, wheres: &mut MySqlParams, field: &str) {
-        let (op, val) = match filter {
-            SqlCmp::Eq(v) => ("=", v),
-            SqlCmp::Lt(v) => ("<", v),
-            SqlCmp::Gt(v) => (">", v),
-            SqlCmp::Lte(v) => ("<=", v),
-            SqlCmp::Gte(v) => (">=", v),
-            other => panic!("{field} can not be filtered by {other:?}"),
-        };
-        wheres.push((
-            format!("{field} {op} ?"),
-            vec![MySqlParamValue::String(val.to_string())],
-        ));
+        match filter {
+            SqlCmp::In(vals) => {
+                let placeholders = vec!["?"; vals.len()].join(", ");
+                wheres.push((
+                    format!("{field} IN ({placeholders})"),
+                    vals.iter().map(|v| v.clone().into()).collect(),
+                ));
+            }
+            other => {
+                let (op, val) = match other {
+                    SqlCmp::Eq(v) => ("=", v),
+                    SqlCmp::Lt(v) => ("<", v),
+                    SqlCmp::Gt(v) => (">", v),
+                    SqlCmp::Lte(v) => ("<=", v),
+                    SqlCmp::Gte(v) => (">=", v),
+                    _ => panic!("{field} can not be filtered by {other:?}"),
+                };
+                wheres.push((format!("{field} {op} ?"), vec![val.clone().into()]));
+            }
+        }
     }
 
     fn parse_id_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
@@ -318,6 +350,10 @@ mod tests {
     #[case(
         EventFilter::new().with_parent_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
         (" WHERE parent_id = ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    #[case(
+        EventFilter::new().with_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
+        (" WHERE id IN (?, ?)".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27ce".into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     #[case(
         EventFilter::new().with_duration(Eq(2000_u64)),
