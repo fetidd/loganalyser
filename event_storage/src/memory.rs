@@ -49,4 +49,6 @@ impl EventStorage for MemoryEventStore {
     }
 }
 
-fn apply_filter(event: &Event, filter: &EventFilter) -> bool {}
+fn apply_filter(event: &Event, filter: &EventFilter) -> bool {
+    true
+}

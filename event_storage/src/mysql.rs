@@ -143,9 +143,7 @@ impl EventStorage for MySqlEventStore {
                     },
                     other => return Err(Error::Storage(format!("unknown event_type: {other}"))),
                 };
-                if filter.apply(&event) {
-                    events.push(event);
-                }
+                events.push(event);
             }
             Ok(events)
         }
@@ -370,6 +368,71 @@ mod tests {
     #[case(
         EventFilter::new().with_data("field", Eq("value")).with_data("abc", Like("%123%")),
         (" WHERE data->>? = ? AND data->>? LIKE ?".into(), vec!["$.field".into(), "value".into(), "$.abc".into(), "%123%".into()])
+    )]
+    // duration comparisons
+    #[case(
+        EventFilter::new().with_duration(Gt(500_u64)),
+        (" WHERE duration_ms > ?".into(), vec![500_u64.into()])
+    )]
+    #[case(
+        EventFilter::new().with_duration(Lt(1000_u64)),
+        (" WHERE duration_ms < ?".into(), vec![1000_u64.into()])
+    )]
+    #[case(
+        EventFilter::new().with_duration(Gte(100_u64)),
+        (" WHERE duration_ms >= ?".into(), vec![100_u64.into()])
+    )]
+    #[case(
+        EventFilter::new().with_duration(Lte(9999_u64)),
+        (" WHERE duration_ms <= ?".into(), vec![9999_u64.into()])
+    )]
+    #[case(
+        EventFilter::new().with_duration(In(vec![100_u64, 200_u64, 300_u64])),
+        (" WHERE duration_ms IN (?, ?, ?)".into(), vec![100_u64.into(), 200_u64.into(), 300_u64.into()])
+    )]
+    // id comparisons
+    #[case(
+        EventFilter::new().with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        (" WHERE id = ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    #[case(
+        EventFilter::new().with_id(Lt("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        (" WHERE id < ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    #[case(
+        EventFilter::new().with_id(Gt("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        (" WHERE id > ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    // parent_id with In
+    #[case(
+        EventFilter::new().with_parent_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
+        (" WHERE parent_id IN (?, ?)".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27ce".into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    // timestamp comparisons
+    #[case(
+        EventFilter::new().with_timestamp(Eq("2026-01-01 00:00:00")),
+        (" WHERE timestamp = ?".into(), vec!["2026-01-01 00:00:00".into()])
+    )]
+    #[case(
+        EventFilter::new().with_timestamp(Lt("2026-01-01 00:00:00")),
+        (" WHERE timestamp < ?".into(), vec!["2026-01-01 00:00:00".into()])
+    )]
+    #[case(
+        EventFilter::new().with_timestamp(Gt("2026-01-01 00:00:00")),
+        (" WHERE timestamp > ?".into(), vec!["2026-01-01 00:00:00".into()])
+    )]
+    #[case(
+        EventFilter::new().with_timestamp(In(vec!["2025-06-01 00:00:00", "2026-01-01 00:00:00"])),
+        (" WHERE timestamp IN (?, ?)".into(), vec!["2025-06-01 00:00:00".into(), "2026-01-01 00:00:00".into()])
+    )]
+    // multi-field combinations
+    #[case(
+        EventFilter::new().with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")).with_duration(Gt(0_u64)),
+        (" WHERE duration_ms > ? AND id = ?".into(), vec![0_u64.into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    #[case(
+        EventFilter::new().with_timestamp(Gte("2025-01-01 00:00:00")).with_data("env", Like("%prod%")),
+        (" WHERE data->>? LIKE ? AND timestamp >= ?".into(), vec!["$.env".into(), "%prod%".into(), "2025-01-01 00:00:00".into()])
     )]
     fn test_get_where(
         #[case] filter: EventFilter,
