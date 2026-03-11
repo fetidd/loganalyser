@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use shared::event::Event;
 
-use crate::{Error, EventFilter, EventStorage, Result};
+use crate::{Error, Filter, EventStorage, Result};
 
 #[derive(Debug)]
 pub struct MemoryEventStore {
@@ -36,7 +36,7 @@ impl EventStorage for MemoryEventStore {
         std::future::ready(res)
     }
 
-    fn load(&self, filter: EventFilter) -> impl Future<Output = Result<Vec<Event>>> + Send {
+    fn load(&self, filter: Filter) -> impl Future<Output = Result<Vec<Event>>> + Send {
         let res = match self.events.read() {
             Ok(stored) => Ok(stored
                 .iter()
@@ -49,6 +49,6 @@ impl EventStorage for MemoryEventStore {
     }
 }
 
-fn apply_filter(event: &Event, filter: &EventFilter) -> bool {
+fn apply_filter(event: &Event, filter: &Filter) -> bool {
     true
 }

@@ -5,8 +5,8 @@ use shared::event::Event;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::event_filter::{Clause, Cmp, Filterable};
-use crate::{Error, EventFilter, EventStorage, Result};
+use crate::event_filter::{Cmp, Expr, Predicate};
+use crate::{Error, EventStorage, Filter, Result};
 
 /// MySQL-backed event store.
 ///
@@ -91,7 +91,7 @@ impl EventStorage for MySqlEventStore {
         }
     }
 
-    fn load(&self, filter: EventFilter) -> impl Future<Output = Result<Vec<Event>>> + Send {
+    fn load(&self, filter: Filter) -> impl Future<Output = Result<Vec<Event>>> + Send {
         let pool = self.pool.clone();
         let MySqlParams(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!(
@@ -285,11 +285,11 @@ impl MySqlEventStore {
         }
     }
 
-    fn parse_and(clauses: &Vec<Clause>, where_params: &mut MySqlParams) {
+    fn parse_and(clauses: &Vec<Expr>, where_params: &mut MySqlParams) {
         let mut and_wheres = vec![];
         for clause in clauses {
             let mut w = MySqlParams::new();
-            Self::parse_clause(clause, &mut w);
+            Self::parse_clause(clause, &mut w, true);
             and_wheres.push(w);
         }
         let mut where_sql = String::new();
@@ -304,11 +304,11 @@ impl MySqlEventStore {
         where_params.add(&where_sql, &where_binds);
     }
 
-    fn parse_or(clauses: &Vec<Clause>, where_params: &mut MySqlParams) {
+    fn parse_or(clauses: &Vec<Expr>, where_params: &mut MySqlParams, need_to_wrap: bool) {
         let mut and_wheres = vec![];
         for clause in clauses {
             let mut w = MySqlParams::new();
-            Self::parse_clause(clause, &mut w);
+            Self::parse_clause(clause, &mut w, false);
             and_wheres.push(w);
         }
         let mut where_sql = String::new();
@@ -320,27 +320,30 @@ impl MySqlEventStore {
             where_sql.push_str(&sql);
             where_binds.extend(binds);
         }
+        if need_to_wrap {
+            where_sql = format!("({where_sql})");
+        }
         where_params.add(&where_sql, &where_binds);
     }
 
-    fn parse_clause(clause: &Clause, where_params: &mut MySqlParams) {
+    fn parse_clause(clause: &Expr, where_params: &mut MySqlParams, and_parent: bool) {
         match clause {
-            Clause::Condition(filterable) => match filterable {
-                Filterable::Data(cmp) => Self::parse_data_filter(&cmp, where_params),
-                Filterable::Timestamp(cmp) => Self::parse_timestamp_filter(&cmp, where_params),
-                Filterable::Id(cmp) => Self::parse_id_filter(&cmp, where_params, "id"),
-                Filterable::ParentId(cmp) => Self::parse_id_filter(&cmp, where_params, "parent_id"),
-                Filterable::Duration(cmp) => Self::parse_duration_filter(&cmp, where_params),
+            Expr::Condition(filterable) => match filterable {
+                Predicate::Data(cmp) => Self::parse_data_filter(&cmp, where_params),
+                Predicate::Timestamp(cmp) => Self::parse_timestamp_filter(&cmp, where_params),
+                Predicate::Id(cmp) => Self::parse_id_filter(&cmp, where_params, "id"),
+                Predicate::ParentId(cmp) => Self::parse_id_filter(&cmp, where_params, "parent_id"),
+                Predicate::Duration(cmp) => Self::parse_duration_filter(&cmp, where_params),
             },
-            Clause::And(clauses) => Self::parse_and(clauses, where_params),
-            Clause::Or(clauses) => Self::parse_or(clauses, where_params),
+            Expr::And(clauses) => Self::parse_and(clauses, where_params),
+            Expr::Or(clauses) => Self::parse_or(clauses, where_params, and_parent),
         }
     }
 
-    fn get_where_sql(filter: &EventFilter) -> MySqlParams {
+    fn get_where_sql(filter: &Filter) -> MySqlParams {
         let mut wheres: MySqlParams = MySqlParams::new();
-        if let Some(clause) = filter.clause() {
-            Self::parse_clause(clause, &mut wheres);
+        if let Some(clause) = filter.expr() {
+            Self::parse_clause(clause, &mut wheres, false);
             wheres.0 = format!(" WHERE {0}", wheres.0);
         }
         wheres
@@ -349,102 +352,116 @@ impl MySqlEventStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::event_filter::{and, data, id, or, timestamp};
+
     use super::Cmp::*;
     use super::*;
     use rstest::rstest;
 
     #[rstest]
     #[case(
-        EventFilter::new(),
+        Filter::new(),
         ("".into(), vec![])
     )]
     #[case(
-        EventFilter::new().with_parent_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        and([data("field", Eq("123")), or([timestamp(Lt("2026-01-01 00:00:00")), timestamp(Gt("2028-01-01 00:00:00"))])]),
+        (" WHERE data->>? = ? AND (timestamp < ? OR timestamp > ?)".into(), vec!["$.field".into(), "123".into(), "2026-01-01 00:00:00".into(), "2028-01-01 00:00:00".into()])
+    )]
+    #[case(
+        or([data("field", Eq("123")), timestamp(Lt("2026-01-01 00:00:00"))]),
+        (" WHERE data->>? = ? OR timestamp < ?".into(), vec!["$.field".into(), "123".into(), "2026-01-01 00:00:00".into()])
+    )]
+    #[case(
+        id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        (" WHERE id = ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
+    )]
+    #[case(
+        Filter::new().with_parent_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
         (" WHERE parent_id = ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     #[case(
-        EventFilter::new().with_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
+        Filter::new().with_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
         (" WHERE id IN (?, ?)".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27ce".into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     #[case(
-        EventFilter::new().with_duration(Eq(2000_u64)),
+        Filter::new().with_duration(Eq(2000_u64)),
         (" WHERE duration_ms = ?".into(), vec![2000_u64.into()])
     )]
     #[case(
-        EventFilter::new().with_timestamp(Lte("2026-01-01 00:00:00")).with_timestamp(Gte("2025-01-01 00:00:00")),
+        Filter::new().with_timestamp(Lte("2026-01-01 00:00:00")).with_timestamp(Gte("2025-01-01 00:00:00")),
         (" WHERE timestamp <= ? AND timestamp >= ?".into(), vec!["2026-01-01 00:00:00".into(), "2025-01-01 00:00:00".into()])
     )]
     #[case(
-        EventFilter::new().with_data("field", Eq("value")),
+        Filter::new().with_data("field", Eq("value")),
         (" WHERE data->>? = ?".into(), vec!["$.field".into(), "value".into()])
     )]
     #[case(
-        EventFilter::new().with_data("field", Eq("value")).with_data("abc", Like("%123%")),
+        Filter::new().with_data("field", Eq("value")).with_data("abc", Like("%123%")),
         (" WHERE data->>? = ? AND data->>? LIKE ?".into(), vec!["$.field".into(), "value".into(), "$.abc".into(), "%123%".into()])
     )]
     // duration comparisons
     #[case(
-        EventFilter::new().with_duration(Gt(500_u64)),
+        Filter::new().with_duration(Gt(500_u64)),
         (" WHERE duration_ms > ?".into(), vec![500_u64.into()])
     )]
     #[case(
-        EventFilter::new().with_duration(Lt(1000_u64)),
+        Filter::new().with_duration(Lt(1000_u64)),
         (" WHERE duration_ms < ?".into(), vec![1000_u64.into()])
     )]
     #[case(
-        EventFilter::new().with_duration(Gte(100_u64)),
+        Filter::new().with_duration(Gte(100_u64)),
         (" WHERE duration_ms >= ?".into(), vec![100_u64.into()])
     )]
     #[case(
-        EventFilter::new().with_duration(Lte(9999_u64)),
+        Filter::new().with_duration(Lte(9999_u64)),
         (" WHERE duration_ms <= ?".into(), vec![9999_u64.into()])
     )]
     #[case(
-        EventFilter::new().with_duration(In(vec![100_u64, 200_u64, 300_u64])),
+        Filter::new().with_duration(In(vec![100_u64, 200_u64, 300_u64])),
         (" WHERE duration_ms IN (?, ?, ?)".into(), vec![100_u64.into(), 200_u64.into(), 300_u64.into()])
     )]
     // id comparisons
     #[case(
-        EventFilter::new().with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        Filter::new().with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
         (" WHERE id = ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     // parent_id with In
     #[case(
-        EventFilter::new().with_parent_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
+        Filter::new().with_parent_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
         (" WHERE parent_id IN (?, ?)".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27ce".into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     // timestamp comparisons
     #[case(
-        EventFilter::new().with_timestamp(Eq("2026-01-01 00:00:00")),
+        Filter::new().with_timestamp(Eq("2026-01-01 00:00:00")),
         (" WHERE timestamp = ?".into(), vec!["2026-01-01 00:00:00".into()])
     )]
     #[case(
-        EventFilter::new().with_timestamp(Lt("2026-01-01 00:00:00")),
+        Filter::new().with_timestamp(Lt("2026-01-01 00:00:00")),
         (" WHERE timestamp < ?".into(), vec!["2026-01-01 00:00:00".into()])
     )]
     #[case(
-        EventFilter::new().with_timestamp(Gt("2026-01-01 00:00:00")),
+        Filter::new().with_timestamp(Gt("2026-01-01 00:00:00")),
         (" WHERE timestamp > ?".into(), vec!["2026-01-01 00:00:00".into()])
     )]
     #[case(
-        EventFilter::new().with_timestamp(In(vec!["2025-06-01 00:00:00", "2026-01-01 00:00:00"])),
+        Filter::new().with_timestamp(In(vec!["2025-06-01 00:00:00", "2026-01-01 00:00:00"])),
         (" WHERE timestamp IN (?, ?)".into(), vec!["2025-06-01 00:00:00".into(), "2026-01-01 00:00:00".into()])
     )]
     // multi-field combinations
     #[case(
-        EventFilter::new().with_duration(Gt(0_u64)).with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
+        Filter::new().with_duration(Gt(0_u64)).with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
         (" WHERE duration_ms > ? AND id = ?".into(), vec![0_u64.into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     #[case(
-        EventFilter::new().with_data("env", Like("%prod%")).with_timestamp(Gte("2025-01-01 00:00:00")),
+        Filter::new().with_data("env", Like("%prod%")).with_timestamp(Gte("2025-01-01 00:00:00")),
         (" WHERE data->>? LIKE ? AND timestamp >= ?".into(), vec!["$.env".into(), "%prod%".into(), "2025-01-01 00:00:00".into()])
     )]
     fn test_get_where_sql(
-        #[case] filter: EventFilter,
+        #[case] filter: impl Into<Filter>,
         #[case] expected: (String, Vec<MySqlParamValue>),
     ) {
         let mut expected_msp = MySqlParams::new();
         expected_msp.add(&expected.0, &expected.1);
-        assert_eq!(MySqlEventStore::get_where_sql(&filter), expected_msp);
+        assert_eq!(MySqlEventStore::get_where_sql(&filter.into()), expected_msp);
     }
 }

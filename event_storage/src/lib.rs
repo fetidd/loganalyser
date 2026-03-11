@@ -5,10 +5,10 @@ pub mod event_filter;
 pub mod memory;
 pub mod mysql;
 
+pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
 
-use crate::event_filter::EventFilter;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -26,7 +26,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait EventStorage {
     fn store(&self, events: &[Event]) -> impl Future<Output = Result<()>> + Send;
-    fn load(&self, filter: EventFilter) -> impl Future<Output = Result<Vec<Event>>> + Send;
+    fn load(&self, filter: Filter) -> impl Future<Output = Result<Vec<Event>>> + Send;
 }
 
 #[cfg(test)]
@@ -35,7 +35,7 @@ mod tests {
 
     use shared::event::Event;
 
-    use crate::{EventFilter, EventStorage, MemoryEventStore};
+    use crate::{Filter, EventStorage, MemoryEventStore};
 
     #[tokio::test]
     async fn test_new_in_memory_storage() {
@@ -50,7 +50,7 @@ mod tests {
             .await
             .expect("failed to store");
         let read = store
-            .load(EventFilter::new())
+            .load(Filter::new())
             .await
             .expect("failed to load");
         assert_eq!(event, read[0]);
