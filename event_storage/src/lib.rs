@@ -1,11 +1,14 @@
 use shared::event::Event;
 use thiserror::Error;
 
+pub mod event_filter;
 pub mod memory;
 pub mod mysql;
 
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
+
+use crate::event_filter::EventFilter;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -24,109 +27,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub trait EventStorage {
     fn store(&self, events: &[Event]) -> impl Future<Output = Result<()>> + Send;
     fn load(&self, filter: EventFilter) -> impl Future<Output = Result<Vec<Event>>> + Send;
-}
-
-#[derive(Clone, Debug)]
-pub enum SqlCmp<T> {
-    Eq(T),
-    Gt(T),
-    Lt(T),
-    Gte(T),
-    Lte(T),
-    Like(T),
-    In(Vec<T>),
-    Json(String, Box<SqlCmp<T>>),
-}
-
-impl<T> SqlCmp<T> {
-    pub fn map<U>(self, f: impl Fn(T) -> U) -> SqlCmp<U> {
-        match self {
-            SqlCmp::Eq(v) => SqlCmp::Eq(f(v)),
-            SqlCmp::Gt(v) => SqlCmp::Gt(f(v)),
-            SqlCmp::Lt(v) => SqlCmp::Lt(f(v)),
-            SqlCmp::Gte(v) => SqlCmp::Gte(f(v)),
-            SqlCmp::Lte(v) => SqlCmp::Lte(f(v)),
-            SqlCmp::Like(v) => SqlCmp::Like(f(v)),
-            SqlCmp::In(vals) => SqlCmp::In(vals.into_iter().map(f).collect()),
-            SqlCmp::Json(k, inner) => SqlCmp::Json(k, Box::new(inner.map(f))),
-        }
-    }
-}
-
-pub struct EventFilter {
-    data: Option<Vec<SqlCmp<String>>>,
-    timestamp: Option<Vec<SqlCmp<String>>>,
-    id: Option<Vec<SqlCmp<String>>>,
-    parent_id: Option<Vec<SqlCmp<String>>>,
-    duration: Option<Vec<SqlCmp<u64>>>,
-}
-
-impl EventFilter {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_data(mut self, field: &str, sql_cmp: SqlCmp<impl Into<String>>) -> Self {
-        let s = SqlCmp::Json(field.into(), Box::new(sql_cmp.map(Into::into)));
-        if let Some(current_data) = &mut self.data {
-            current_data.push(s);
-        } else {
-            self.data = Some(vec![s]);
-        }
-        self
-    }
-
-    pub fn with_timestamp(mut self, sql_cmp: SqlCmp<impl Into<String>>) -> Self {
-        let sql_cmp = sql_cmp.map(Into::into);
-        if let Some(current_data) = &mut self.timestamp {
-            current_data.push(sql_cmp);
-        } else {
-            self.timestamp = Some(vec![sql_cmp]);
-        }
-        self
-    }
-
-    pub fn with_id(mut self, sql_cmp: SqlCmp<impl Into<String>>) -> Self {
-        let sql_cmp = sql_cmp.map(Into::into);
-        if let Some(current_data) = &mut self.id {
-            current_data.push(sql_cmp);
-        } else {
-            self.id = Some(vec![sql_cmp]);
-        }
-        self
-    }
-
-    pub fn with_parent_id(mut self, sql_cmp: SqlCmp<impl Into<String>>) -> Self {
-        let sql_cmp = sql_cmp.map(Into::into);
-        if let Some(current_data) = &mut self.parent_id {
-            current_data.push(sql_cmp);
-        } else {
-            self.parent_id = Some(vec![sql_cmp]);
-        }
-        self
-    }
-
-    pub fn with_duration(mut self, sql_cmp: SqlCmp<impl Into<u64>>) -> Self {
-        let sql_cmp = sql_cmp.map(Into::into);
-        if let Some(current_data) = &mut self.duration {
-            current_data.push(sql_cmp);
-        } else {
-            self.duration = Some(vec![sql_cmp]);
-        }
-        self
-    }
-}
-
-impl Default for EventFilter {
-    fn default() -> Self {
-        Self {
-            data: Default::default(),
-            timestamp: Default::default(),
-            id: Default::default(),
-            parent_id: Default::default(),
-            duration: Default::default(),
-        }
-    }
 }
 
 #[cfg(test)]

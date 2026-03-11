@@ -5,7 +5,8 @@ use shared::event::Event;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{Error, EventFilter, EventStorage, Result, SqlCmp};
+use crate::event_filter::{Cmp, Filterable};
+use crate::{Error, EventFilter, EventStorage, Result};
 
 /// MySQL-backed event store.
 ///
@@ -184,89 +185,77 @@ impl From<&str> for MySqlParamValue {
 }
 
 impl MySqlEventStore {
-    fn parse_data_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
-        if let Some(filters) = &filter.data {
-            for filter in filters {
-                match filter {
-                    SqlCmp::Json(field, sql_cmp) => {
-                        let (op, val) = match &**sql_cmp {
-                            SqlCmp::Eq(s) => ("=", s),
-                            SqlCmp::Like(s) => ("LIKE", s),
-                            _ => panic!("only = or LIKE"),
-                        };
-                        wheres.push((
-                            format!("data->>? {op} ?"),
-                            vec![format!("$.{field}").into(), val.clone().into()],
-                        ));
-                    }
-                    other => panic!("data can not be filtered by {other:?}"),
-                }
-            }
-        }
-    }
-
-    fn parse_timestamp_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
-        if let Some(filters) = &filter.timestamp {
-            for filter in filters {
-                match filter {
-                    SqlCmp::In(vals) => {
-                        let placeholders = vec!["?"; vals.len()].join(", ");
-                        wheres.push((
-                            format!("timestamp IN ({placeholders})"),
-                            vals.iter().map(|v| v.clone().into()).collect(),
-                        ));
-                    }
-                    other => {
-                        let (op, val) = match other {
-                            SqlCmp::Eq(v) => ("=", v),
-                            SqlCmp::Lt(v) => ("<", v),
-                            SqlCmp::Gt(v) => (">", v),
-                            SqlCmp::Lte(v) => ("<=", v),
-                            SqlCmp::Gte(v) => (">=", v),
-                            _ => panic!("timestamp can not be filtered by {other:?}"),
-                        };
-                        wheres.push((format!("timestamp {op} ?"), vec![val.clone().into()]));
-                    }
-                }
-            }
-        }
-    }
-
-    fn parse_duration_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
-        if let Some(filters) = &filter.duration {
-            for filter in filters {
-                match filter {
-                    SqlCmp::In(vals) => {
-                        let placeholders = vec!["?"; vals.len()].join(", ");
-                        wheres.push((
-                            format!("duration_ms IN ({placeholders})"),
-                            vals.iter()
-                                .map(|v| MySqlParamValue::UnsignedNumber(*v))
-                                .collect(),
-                        ));
-                    }
-                    other => {
-                        let (op, val) = match other {
-                            SqlCmp::Eq(v) => ("=", v),
-                            SqlCmp::Lt(v) => ("<", v),
-                            SqlCmp::Gt(v) => (">", v),
-                            SqlCmp::Lte(v) => ("<=", v),
-                            SqlCmp::Gte(v) => (">=", v),
-                            _ => panic!("duration can not be filtered by {other:?}"),
-                        };
-                        wheres.push((
-                            format!("duration_ms {op} ?"),
-                            vec![MySqlParamValue::UnsignedNumber(*val)],
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    fn _parse_id_filter(filter: &SqlCmp<String>, wheres: &mut MySqlParams, field: &str) {
+    fn parse_data_filter(filter: &Cmp<String>, wheres: &mut MySqlParams) {
         match filter {
-            SqlCmp::In(vals) => {
+            Cmp::Json(field, sql_cmp) => {
+                let (op, val) = match &**sql_cmp {
+                    Cmp::Eq(s) => ("=", s),
+                    Cmp::Like(s) => ("LIKE", s),
+                    _ => panic!("only = or LIKE"),
+                };
+                wheres.push((
+                    format!("data->>? {op} ?"),
+                    vec![format!("$.{field}").into(), val.clone().into()],
+                ));
+            }
+            other => panic!("data can not be filtered by {other:?}"),
+        }
+    }
+
+    fn parse_timestamp_filter(filter: &Cmp<String>, wheres: &mut MySqlParams) {
+        match filter {
+            Cmp::In(vals) => {
+                let placeholders = vec!["?"; vals.len()].join(", ");
+                wheres.push((
+                    format!("timestamp IN ({placeholders})"),
+                    vals.iter().map(|v| v.clone().into()).collect(),
+                ));
+            }
+            other => {
+                let (op, val) = match other {
+                    Cmp::Eq(v) => ("=", v),
+                    Cmp::Lt(v) => ("<", v),
+                    Cmp::Gt(v) => (">", v),
+                    Cmp::Lte(v) => ("<=", v),
+                    Cmp::Gte(v) => (">=", v),
+                    _ => panic!("timestamp can not be filtered by {other:?}"),
+                };
+                wheres.push((format!("timestamp {op} ?"), vec![val.clone().into()]));
+            }
+        }
+    }
+
+    fn parse_duration_filter(filter: &Cmp<u64>, wheres: &mut MySqlParams) {
+        match filter {
+            Cmp::In(vals) => {
+                let placeholders = vec!["?"; vals.len()].join(", ");
+                wheres.push((
+                    format!("duration_ms IN ({placeholders})"),
+                    vals.iter()
+                        .map(|v| MySqlParamValue::UnsignedNumber(*v))
+                        .collect(),
+                ));
+            }
+            other => {
+                let (op, val) = match other {
+                    Cmp::Eq(v) => ("=", v),
+                    Cmp::Lt(v) => ("<", v),
+                    Cmp::Gt(v) => (">", v),
+                    Cmp::Lte(v) => ("<=", v),
+                    Cmp::Gte(v) => (">=", v),
+                    _ => panic!("duration can not be filtered by {other:?}"),
+                };
+                wheres.push((
+                    format!("duration_ms {op} ?"),
+                    vec![MySqlParamValue::UnsignedNumber(*val)],
+                ));
+            }
+        }
+    }
+
+    fn parse_id_filter(filter: &Cmp<String>, wheres: &mut MySqlParams, field: &str) {
+        match filter {
+            Cmp::In(vals) => {
                 let placeholders = vec!["?"; vals.len()].join(", ");
                 wheres.push((
                     format!("{field} IN ({placeholders})"),
@@ -275,11 +264,7 @@ impl MySqlEventStore {
             }
             other => {
                 let (op, val) = match other {
-                    SqlCmp::Eq(v) => ("=", v),
-                    SqlCmp::Lt(v) => ("<", v),
-                    SqlCmp::Gt(v) => (">", v),
-                    SqlCmp::Lte(v) => ("<=", v),
-                    SqlCmp::Gte(v) => (">=", v),
+                    Cmp::Eq(v) => ("=", v),
                     _ => panic!("{field} can not be filtered by {other:?}"),
                 };
                 wheres.push((format!("{field} {op} ?"), vec![val.clone().into()]));
@@ -287,32 +272,16 @@ impl MySqlEventStore {
         }
     }
 
-    fn parse_id_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
-        if let Some(filters) = &filter.id {
-            for filter in filters {
-                Self::_parse_id_filter(filter, wheres, "id");
-            }
-        }
-    }
-
-    fn parse_parent_id_filters(filter: &EventFilter, wheres: &mut MySqlParams) {
-        if let Some(filters) = &filter.parent_id {
-            for filter in filters {
-                Self::_parse_id_filter(filter, wheres, "parent_id");
-            }
-        }
-    }
-
     fn get_where(filter: &EventFilter) -> (String, Vec<MySqlParamValue>) {
         let mut wheres: MySqlParams = vec![];
-        for parser in [
-            Self::parse_data_filters,
-            Self::parse_timestamp_filters,
-            Self::parse_duration_filters,
-            Self::parse_id_filters,
-            Self::parse_parent_id_filters,
-        ] {
-            parser(filter, &mut wheres);
+        for filterable in filter.filters() {
+            match filterable {
+                Filterable::Data(cmp) => Self::parse_data_filter(&cmp, &mut wheres),
+                Filterable::Timestamp(cmp) => Self::parse_timestamp_filter(&cmp, &mut wheres),
+                Filterable::Id(cmp) => Self::parse_id_filter(&cmp, &mut wheres, "id"),
+                Filterable::ParentId(cmp) => Self::parse_id_filter(&cmp, &mut wheres, "parent_id"),
+                Filterable::Duration(cmp) => Self::parse_duration_filter(&cmp, &mut wheres),
+            }
         }
         if !wheres.is_empty() {
             wheres.into_iter().fold(
@@ -334,11 +303,9 @@ impl MySqlEventStore {
 
 #[cfg(test)]
 mod tests {
-    use rstest::rstest;
-
-    use crate::SqlCmp::*;
-
+    use super::Cmp::*;
     use super::*;
+    use rstest::rstest;
 
     #[rstest]
     #[case(
@@ -395,14 +362,6 @@ mod tests {
         EventFilter::new().with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
         (" WHERE id = ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
-    #[case(
-        EventFilter::new().with_id(Lt("4cde4c35-9492-4f01-bd84-7109431c27cd")),
-        (" WHERE id < ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
-    )]
-    #[case(
-        EventFilter::new().with_id(Gt("4cde4c35-9492-4f01-bd84-7109431c27cd")),
-        (" WHERE id > ?".into(), vec!["4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
-    )]
     // parent_id with In
     #[case(
         EventFilter::new().with_parent_id(In(vec!["4cde4c35-9492-4f01-bd84-7109431c27ce", "4cde4c35-9492-4f01-bd84-7109431c27cd"])),
@@ -427,11 +386,11 @@ mod tests {
     )]
     // multi-field combinations
     #[case(
-        EventFilter::new().with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")).with_duration(Gt(0_u64)),
+        EventFilter::new().with_duration(Gt(0_u64)).with_id(Eq("4cde4c35-9492-4f01-bd84-7109431c27cd")),
         (" WHERE duration_ms > ? AND id = ?".into(), vec![0_u64.into(), "4cde4c35-9492-4f01-bd84-7109431c27cd".into()])
     )]
     #[case(
-        EventFilter::new().with_timestamp(Gte("2025-01-01 00:00:00")).with_data("env", Like("%prod%")),
+        EventFilter::new().with_data("env", Like("%prod%")).with_timestamp(Gte("2025-01-01 00:00:00")),
         (" WHERE data->>? LIKE ? AND timestamp >= ?".into(), vec!["$.env".into(), "%prod%".into(), "2025-01-01 00:00:00".into()])
     )]
     fn test_get_where(
