@@ -25,8 +25,14 @@ impl<T> Cmp<T> {
     }
 }
 
+pub enum Clause {
+    Condition(Filterable),
+    And(Vec<Clause>),
+    Or(Vec<Clause>),
+}
+
 pub struct EventFilter {
-    filters: Vec<Filterable>,
+    clause: Option<Clause>,
 }
 
 pub enum Filterable {
@@ -42,43 +48,123 @@ impl EventFilter {
         Self::default()
     }
 
-    pub fn filters(&self) -> &Vec<Filterable> {
-        &self.filters
+    pub fn clause(&self) -> Option<&Clause> {
+        self.clause.as_ref()
     }
 
     pub fn with_data(mut self, field: &str, cmp: Cmp<impl Into<String>>) -> Self {
         let cmp = Cmp::Json(field.into(), Box::new(cmp.map(Into::into)));
-        self.filters.push(Filterable::Data(cmp));
+        if let Some(clause) = self.clause {
+            match clause {
+                Clause::Condition(filterable) => {
+                    self.clause = Some(Clause::And(vec![
+                        Clause::Condition(filterable),
+                        Clause::Condition(Filterable::Data(cmp)),
+                    ]))
+                }
+                Clause::And(mut clauses) => {
+                    clauses.push(Clause::Condition(Filterable::Data(cmp)));
+                    self.clause = Some(Clause::And(clauses));
+                }
+                _ => panic!("with_ methods cannot OR"),
+            }
+        } else {
+            self.clause = Some(Clause::Condition(Filterable::Data(cmp)));
+        }
         self
     }
 
     pub fn with_timestamp(mut self, cmp: Cmp<impl Into<String>>) -> Self {
         let cmp = cmp.map(Into::into);
-        self.filters.push(Filterable::Timestamp(cmp));
+        if let Some(clause) = self.clause {
+            match clause {
+                Clause::Condition(filterable) => {
+                    self.clause = Some(Clause::And(vec![
+                        Clause::Condition(filterable),
+                        Clause::Condition(Filterable::Timestamp(cmp)),
+                    ]))
+                }
+                Clause::And(mut clauses) => {
+                    clauses.push(Clause::Condition(Filterable::Timestamp(cmp)));
+                    self.clause = Some(Clause::And(clauses));
+                }
+                _ => panic!("with_ methods cannot OR"),
+            }
+        } else {
+            self.clause = Some(Clause::Condition(Filterable::Timestamp(cmp)));
+        }
         self
     }
 
     pub fn with_id(mut self, cmp: Cmp<impl Into<String>>) -> Self {
         let cmp = cmp.map(Into::into);
-        self.filters.push(Filterable::Id(cmp));
+        if let Some(clause) = self.clause {
+            match clause {
+                Clause::Condition(filterable) => {
+                    self.clause = Some(Clause::And(vec![
+                        Clause::Condition(filterable),
+                        Clause::Condition(Filterable::Id(cmp)),
+                    ]))
+                }
+                Clause::And(mut clauses) => {
+                    clauses.push(Clause::Condition(Filterable::Id(cmp)));
+                    self.clause = Some(Clause::And(clauses));
+                }
+                _ => panic!("with_ methods cannot OR"),
+            }
+        } else {
+            self.clause = Some(Clause::Condition(Filterable::Id(cmp)));
+        }
         self
     }
 
     pub fn with_parent_id(mut self, cmp: Cmp<impl Into<String>>) -> Self {
         let cmp = cmp.map(Into::into);
-        self.filters.push(Filterable::ParentId(cmp));
+        if let Some(clause) = self.clause {
+            match clause {
+                Clause::Condition(filterable) => {
+                    self.clause = Some(Clause::And(vec![
+                        Clause::Condition(filterable),
+                        Clause::Condition(Filterable::ParentId(cmp)),
+                    ]))
+                }
+                Clause::And(mut clauses) => {
+                    clauses.push(Clause::Condition(Filterable::ParentId(cmp)));
+                    self.clause = Some(Clause::And(clauses));
+                }
+                _ => panic!("with_ methods cannot OR"),
+            }
+        } else {
+            self.clause = Some(Clause::Condition(Filterable::ParentId(cmp)));
+        }
         self
     }
 
     pub fn with_duration(mut self, cmp: Cmp<impl Into<u64>>) -> Self {
         let cmp = cmp.map(Into::into);
-        self.filters.push(Filterable::Duration(cmp));
+        if let Some(clause) = self.clause {
+            match clause {
+                Clause::Condition(filterable) => {
+                    self.clause = Some(Clause::And(vec![
+                        Clause::Condition(filterable),
+                        Clause::Condition(Filterable::Duration(cmp)),
+                    ]))
+                }
+                Clause::And(mut clauses) => {
+                    clauses.push(Clause::Condition(Filterable::Duration(cmp)));
+                    self.clause = Some(Clause::And(clauses));
+                }
+                _ => panic!("with_ methods cannot OR"),
+            }
+        } else {
+            self.clause = Some(Clause::Condition(Filterable::Duration(cmp)));
+        }
         self
     }
 }
 
 impl Default for EventFilter {
     fn default() -> Self {
-        Self { filters: vec![] }
+        Self { clause: None }
     }
 }

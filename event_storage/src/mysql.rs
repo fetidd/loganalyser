@@ -5,7 +5,7 @@ use shared::event::Event;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::event_filter::{Cmp, Filterable};
+use crate::event_filter::{Clause, Cmp, Filterable};
 use crate::{Error, EventFilter, EventStorage, Result};
 
 /// MySQL-backed event store.
@@ -93,7 +93,7 @@ impl EventStorage for MySqlEventStore {
 
     fn load(&self, filter: EventFilter) -> impl Future<Output = Result<Vec<Event>>> + Send {
         let pool = self.pool.clone();
-        let (where_sql, bindings) = Self::get_where(&filter);
+        let MySqlParams(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!(
             "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data FROM events{where_sql}",
         );
@@ -151,9 +151,21 @@ impl EventStorage for MySqlEventStore {
     }
 }
 
-type MySqlParams = Vec<(String, Vec<MySqlParamValue>)>;
+#[derive(Debug, Clone, PartialEq)]
+struct MySqlParams(String, Vec<MySqlParamValue>);
 
-#[derive(Debug, PartialEq)]
+impl MySqlParams {
+    fn new() -> Self {
+        Self(String::new(), vec![])
+    }
+
+    fn add(&mut self, sql: &str, binds: &[MySqlParamValue]) {
+        self.0.push_str(sql);
+        self.1.extend(binds.to_vec());
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 enum MySqlParamValue {
     String(String),
     SignedNumber(i64),
@@ -185,7 +197,7 @@ impl From<&str> for MySqlParamValue {
 }
 
 impl MySqlEventStore {
-    fn parse_data_filter(filter: &Cmp<String>, wheres: &mut MySqlParams) {
+    fn parse_data_filter(filter: &Cmp<String>, where_params: &mut MySqlParams) {
         match filter {
             Cmp::Json(field, sql_cmp) => {
                 let (op, val) = match &**sql_cmp {
@@ -193,23 +205,23 @@ impl MySqlEventStore {
                     Cmp::Like(s) => ("LIKE", s),
                     _ => panic!("only = or LIKE"),
                 };
-                wheres.push((
-                    format!("data->>? {op} ?"),
-                    vec![format!("$.{field}").into(), val.clone().into()],
-                ));
+                where_params.add(
+                    &format!("data->>? {op} ?"),
+                    &[format!("$.{field}").into(), val.clone().into()],
+                );
             }
             other => panic!("data can not be filtered by {other:?}"),
         }
     }
 
-    fn parse_timestamp_filter(filter: &Cmp<String>, wheres: &mut MySqlParams) {
+    fn parse_timestamp_filter(filter: &Cmp<String>, where_params: &mut MySqlParams) {
         match filter {
             Cmp::In(vals) => {
                 let placeholders = vec!["?"; vals.len()].join(", ");
-                wheres.push((
-                    format!("timestamp IN ({placeholders})"),
-                    vals.iter().map(|v| v.clone().into()).collect(),
-                ));
+                where_params.add(
+                    &format!("timestamp IN ({placeholders})"),
+                    &vals.iter().map(|v| v.clone().into()).collect::<Vec<_>>(),
+                );
             }
             other => {
                 let (op, val) = match other {
@@ -220,21 +232,22 @@ impl MySqlEventStore {
                     Cmp::Gte(v) => (">=", v),
                     _ => panic!("timestamp can not be filtered by {other:?}"),
                 };
-                wheres.push((format!("timestamp {op} ?"), vec![val.clone().into()]));
+                where_params.add(&format!("timestamp {op} ?"), &[val.clone().into()]);
             }
         }
     }
 
-    fn parse_duration_filter(filter: &Cmp<u64>, wheres: &mut MySqlParams) {
+    fn parse_duration_filter(filter: &Cmp<u64>, where_params: &mut MySqlParams) {
         match filter {
             Cmp::In(vals) => {
                 let placeholders = vec!["?"; vals.len()].join(", ");
-                wheres.push((
-                    format!("duration_ms IN ({placeholders})"),
-                    vals.iter()
+                where_params.add(
+                    &format!("duration_ms IN ({placeholders})"),
+                    &vals
+                        .iter()
                         .map(|v| MySqlParamValue::UnsignedNumber(*v))
-                        .collect(),
-                ));
+                        .collect::<Vec<_>>(),
+                );
             }
             other => {
                 let (op, val) = match other {
@@ -245,59 +258,92 @@ impl MySqlEventStore {
                     Cmp::Gte(v) => (">=", v),
                     _ => panic!("duration can not be filtered by {other:?}"),
                 };
-                wheres.push((
-                    format!("duration_ms {op} ?"),
-                    vec![MySqlParamValue::UnsignedNumber(*val)],
-                ));
+                where_params.add(
+                    &format!("duration_ms {op} ?"),
+                    &[MySqlParamValue::UnsignedNumber(*val)],
+                );
             }
         }
     }
 
-    fn parse_id_filter(filter: &Cmp<String>, wheres: &mut MySqlParams, field: &str) {
+    fn parse_id_filter(filter: &Cmp<String>, where_params: &mut MySqlParams, field: &str) {
         match filter {
             Cmp::In(vals) => {
                 let placeholders = vec!["?"; vals.len()].join(", ");
-                wheres.push((
-                    format!("{field} IN ({placeholders})"),
-                    vals.iter().map(|v| v.clone().into()).collect(),
-                ));
+                where_params.add(
+                    &format!("{field} IN ({placeholders})"),
+                    &vals.iter().map(|v| v.clone().into()).collect::<Vec<_>>(),
+                );
             }
             other => {
                 let (op, val) = match other {
                     Cmp::Eq(v) => ("=", v),
                     _ => panic!("{field} can not be filtered by {other:?}"),
                 };
-                wheres.push((format!("{field} {op} ?"), vec![val.clone().into()]));
+                where_params.add(&format!("{field} {op} ?"), &[val.clone().into()]);
             }
         }
     }
 
-    fn get_where(filter: &EventFilter) -> (String, Vec<MySqlParamValue>) {
-        let mut wheres: MySqlParams = vec![];
-        for filterable in filter.filters() {
-            match filterable {
-                Filterable::Data(cmp) => Self::parse_data_filter(&cmp, &mut wheres),
-                Filterable::Timestamp(cmp) => Self::parse_timestamp_filter(&cmp, &mut wheres),
-                Filterable::Id(cmp) => Self::parse_id_filter(&cmp, &mut wheres, "id"),
-                Filterable::ParentId(cmp) => Self::parse_id_filter(&cmp, &mut wheres, "parent_id"),
-                Filterable::Duration(cmp) => Self::parse_duration_filter(&cmp, &mut wheres),
+    fn parse_and(clauses: &Vec<Clause>, where_params: &mut MySqlParams) {
+        let mut and_wheres = vec![];
+        for clause in clauses {
+            let mut w = MySqlParams::new();
+            Self::parse_clause(clause, &mut w);
+            and_wheres.push(w);
+        }
+        let mut where_sql = String::new();
+        let mut where_binds = vec![];
+        for MySqlParams(sql, binds) in and_wheres.into_iter() {
+            if !where_sql.is_empty() {
+                where_sql.push_str(" AND ");
             }
+            where_sql.push_str(&sql);
+            where_binds.extend(binds);
         }
-        if !wheres.is_empty() {
-            wheres.into_iter().fold(
-                (String::from(" WHERE "), vec![]),
-                |(mut sql, mut binds), (clause, clause_binds)| {
-                    if sql != " WHERE " {
-                        sql.push_str(" AND ");
-                    }
-                    sql.push_str(&clause);
-                    binds.extend(clause_binds);
-                    (sql, binds)
-                },
-            )
-        } else {
-            ("".into(), vec![])
+        where_params.add(&where_sql, &where_binds);
+    }
+
+    fn parse_or(clauses: &Vec<Clause>, where_params: &mut MySqlParams) {
+        let mut and_wheres = vec![];
+        for clause in clauses {
+            let mut w = MySqlParams::new();
+            Self::parse_clause(clause, &mut w);
+            and_wheres.push(w);
         }
+        let mut where_sql = String::new();
+        let mut where_binds = vec![];
+        for MySqlParams(sql, binds) in and_wheres.into_iter() {
+            if !where_sql.is_empty() {
+                where_sql.push_str(" OR ");
+            }
+            where_sql.push_str(&sql);
+            where_binds.extend(binds);
+        }
+        where_params.add(&where_sql, &where_binds);
+    }
+
+    fn parse_clause(clause: &Clause, where_params: &mut MySqlParams) {
+        match clause {
+            Clause::Condition(filterable) => match filterable {
+                Filterable::Data(cmp) => Self::parse_data_filter(&cmp, where_params),
+                Filterable::Timestamp(cmp) => Self::parse_timestamp_filter(&cmp, where_params),
+                Filterable::Id(cmp) => Self::parse_id_filter(&cmp, where_params, "id"),
+                Filterable::ParentId(cmp) => Self::parse_id_filter(&cmp, where_params, "parent_id"),
+                Filterable::Duration(cmp) => Self::parse_duration_filter(&cmp, where_params),
+            },
+            Clause::And(clauses) => Self::parse_and(clauses, where_params),
+            Clause::Or(clauses) => Self::parse_or(clauses, where_params),
+        }
+    }
+
+    fn get_where_sql(filter: &EventFilter) -> MySqlParams {
+        let mut wheres: MySqlParams = MySqlParams::new();
+        if let Some(clause) = filter.clause() {
+            Self::parse_clause(clause, &mut wheres);
+            wheres.0 = format!(" WHERE {0}", wheres.0);
+        }
+        wheres
     }
 }
 
@@ -393,10 +439,12 @@ mod tests {
         EventFilter::new().with_data("env", Like("%prod%")).with_timestamp(Gte("2025-01-01 00:00:00")),
         (" WHERE data->>? LIKE ? AND timestamp >= ?".into(), vec!["$.env".into(), "%prod%".into(), "2025-01-01 00:00:00".into()])
     )]
-    fn test_get_where(
+    fn test_get_where_sql(
         #[case] filter: EventFilter,
         #[case] expected: (String, Vec<MySqlParamValue>),
     ) {
-        assert_eq!(MySqlEventStore::get_where(&filter), expected);
+        let mut expected_msp = MySqlParams::new();
+        expected_msp.add(&expected.0, &expected.1);
+        assert_eq!(MySqlEventStore::get_where_sql(&filter), expected_msp);
     }
 }
