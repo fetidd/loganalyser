@@ -41,13 +41,13 @@ pub enum SqlCmp<T> {
 impl<T> SqlCmp<T> {
     pub fn map<U>(self, f: impl Fn(T) -> U) -> SqlCmp<U> {
         match self {
-            SqlCmp::Eq(v)          => SqlCmp::Eq(f(v)),
-            SqlCmp::Gt(v)          => SqlCmp::Gt(f(v)),
-            SqlCmp::Lt(v)          => SqlCmp::Lt(f(v)),
-            SqlCmp::Gte(v)         => SqlCmp::Gte(f(v)),
-            SqlCmp::Lte(v)         => SqlCmp::Lte(f(v)),
-            SqlCmp::Like(v)        => SqlCmp::Like(f(v)),
-            SqlCmp::In(vals)       => SqlCmp::In(vals.into_iter().map(f).collect()),
+            SqlCmp::Eq(v) => SqlCmp::Eq(f(v)),
+            SqlCmp::Gt(v) => SqlCmp::Gt(f(v)),
+            SqlCmp::Lt(v) => SqlCmp::Lt(f(v)),
+            SqlCmp::Gte(v) => SqlCmp::Gte(f(v)),
+            SqlCmp::Lte(v) => SqlCmp::Lte(f(v)),
+            SqlCmp::Like(v) => SqlCmp::Like(f(v)),
+            SqlCmp::In(vals) => SqlCmp::In(vals.into_iter().map(f).collect()),
             SqlCmp::Json(k, inner) => SqlCmp::Json(k, Box::new(inner.map(f))),
         }
     }
@@ -114,10 +114,6 @@ impl EventFilter {
             self.duration = Some(vec![sql_cmp]);
         }
         self
-    }
-
-    pub(crate) fn apply(&self, _event: &Event) -> bool {
-        true
     }
 }
 

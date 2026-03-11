@@ -40,7 +40,7 @@ impl EventStorage for MemoryEventStore {
         let res = match self.events.read() {
             Ok(stored) => Ok(stored
                 .iter()
-                .filter(|ev| filter.apply(*ev))
+                .filter(|ev| apply_filter(ev, &filter))
                 .cloned()
                 .collect()),
             Err(e) => Err(Error::Storage(e.to_string())),
@@ -48,3 +48,5 @@ impl EventStorage for MemoryEventStore {
         std::future::ready(res)
     }
 }
+
+fn apply_filter(event: &Event, filter: &EventFilter) -> bool {}
