@@ -4,10 +4,13 @@ use thiserror::Error;
 pub mod event_filter;
 pub mod memory;
 pub mod mysql;
+pub mod sqlite;
+pub(crate) mod sql;
 
 pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
+pub use sqlite::SqliteEventStore;
 
 
 #[derive(Debug, Error)]

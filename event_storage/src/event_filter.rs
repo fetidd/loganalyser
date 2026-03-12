@@ -36,7 +36,7 @@ pub enum Predicate {
     Timestamp(Cmp<String>),
     Id(Cmp<String>),
     ParentId(Cmp<String>),
-    Duration(Cmp<u64>),
+    Duration(Cmp<i64>),
 }
 
 pub fn id(c: Cmp<impl Into<String>>) -> Expr {
@@ -47,7 +47,7 @@ pub fn timestamp(c: Cmp<impl Into<String>>) -> Expr {
     Expr::Condition(Predicate::Timestamp(c.map(Into::into)))
 }
 
-pub fn duration(c: Cmp<impl Into<u64>>) -> Expr {
+pub fn duration(c: Cmp<impl Into<i64>>) -> Expr {
     Expr::Condition(Predicate::Duration(c.map(Into::into)))
 }
 
@@ -112,7 +112,7 @@ impl Filter {
         self.and_condition(Predicate::ParentId(cmp.map(Into::into)))
     }
 
-    pub fn with_duration(self, cmp: Cmp<impl Into<u64>>) -> Self {
+    pub fn with_duration(self, cmp: Cmp<impl Into<i64>>) -> Self {
         self.and_condition(Predicate::Duration(cmp.map(Into::into)))
     }
 }
