@@ -128,3 +128,99 @@ impl From<Expr> for Filter {
         Self { expr: Some(expr) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Cmp::*;
+    use super::*;
+    use rstest::rstest;
+
+    #[test]
+    fn test_new_filter_has_no_expr() {
+        assert!(Filter::new().expr().is_none());
+    }
+
+    #[test]
+    fn test_single_with_produces_condition() {
+        let f = Filter::new().with_id(Eq("abc"));
+        assert!(matches!(f.expr(), Some(Expr::Condition(Predicate::Id(_)))));
+    }
+
+    #[test]
+    fn test_two_withs_produce_and() {
+        let f = Filter::new().with_id(Eq("abc")).with_timestamp(Gt("2025-01-01"));
+        assert!(matches!(f.expr(), Some(Expr::And(v)) if v.len() == 2));
+    }
+
+    #[test]
+    fn test_three_withs_produce_flat_and() {
+        // third condition should extend the existing And, not nest it
+        let f = Filter::new()
+            .with_id(Eq("abc"))
+            .with_timestamp(Gt("2025-01-01"))
+            .with_duration(Lt(1000));
+        assert!(matches!(f.expr(), Some(Expr::And(v)) if v.len() == 3));
+    }
+
+    #[test]
+    fn test_filter_from_expr_wraps_correctly() {
+        let f: Filter = id(Eq("abc")).into();
+        assert!(matches!(f.expr(), Some(Expr::Condition(Predicate::Id(_)))));
+    }
+
+    #[test]
+    fn test_filter_from_or_expr() {
+        let f: Filter = or([id(Eq("a")), timestamp(Gt("2025-01-01"))]).into();
+        assert!(matches!(f.expr(), Some(Expr::Or(v)) if v.len() == 2));
+    }
+
+    #[test]
+    #[should_panic(expected = "with_ methods cannot OR")]
+    fn test_with_panics_on_or_filter() {
+        let f: Filter = or([id(Eq("a")), id(Eq("b"))]).into();
+        f.with_timestamp(Gt("2025-01-01"));
+    }
+
+    #[rstest]
+    #[case(and([id(Eq("a")), timestamp(Gt("b"))]), 2)]
+    #[case(and([id(Eq("a")), timestamp(Gt("b")), duration(Lt(100))]), 3)]
+    fn test_and_free_fn_child_count(#[case] expr: Expr, #[case] expected_len: usize) {
+        assert!(matches!(expr, Expr::And(v) if v.len() == expected_len));
+    }
+
+    #[rstest]
+    #[case(or([id(Eq("a")), timestamp(Gt("b"))]), 2)]
+    #[case(or([id(Eq("a")), timestamp(Gt("b")), duration(Lt(100))]), 3)]
+    fn test_or_free_fn_child_count(#[case] expr: Expr, #[case] expected_len: usize) {
+        assert!(matches!(expr, Expr::Or(v) if v.len() == expected_len));
+    }
+
+    #[rstest]
+    #[case(Eq("a"), "a")]
+    #[case(Gt("b"), "b")]
+    #[case(Lt("c"), "c")]
+    #[case(Gte("d"), "d")]
+    #[case(Lte("e"), "e")]
+    #[case(Like("f"), "f")]
+    fn test_cmp_map_scalar(#[case] cmp: Cmp<&str>, #[case] expected: &str) {
+        let mapped = cmp.map(|s| s.to_uppercase());
+        let val = match mapped {
+            Eq(v) | Gt(v) | Lt(v) | Gte(v) | Lte(v) | Like(v) => v,
+            _ => panic!("unexpected variant"),
+        };
+        assert_eq!(val, expected.to_uppercase());
+    }
+
+    #[test]
+    fn test_cmp_map_in() {
+        let mapped = In(vec!["a", "b"]).map(|s: &str| s.to_uppercase());
+        assert!(matches!(mapped, In(v) if v == vec!["A", "B"]));
+    }
+
+    #[test]
+    fn test_cmp_map_json_maps_inner() {
+        let cmp: Cmp<&str> = Json("field".into(), Box::new(Eq("value")));
+        let mapped = cmp.map(|s: &str| s.to_uppercase());
+        assert!(matches!(mapped, Json(k, inner) if k == "field" && matches!(*inner, Eq(ref v) if v == "VALUE")));
+    }
+}
