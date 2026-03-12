@@ -2,9 +2,9 @@ use shared::event::Event;
 use thiserror::Error;
 
 pub mod event_filter;
-pub mod memory;
-pub mod mysql;
-pub mod sqlite;
+pub(crate) mod memory;
+pub(crate) mod mysql;
+pub(crate) mod sqlite;
 pub(crate) mod sql;
 
 pub use event_filter::Filter;

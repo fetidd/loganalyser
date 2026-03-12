@@ -1,6 +1,7 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, ParseError};
 
 pub mod event;
+pub mod tree;
 
 pub fn datetime_from(ts: &str) -> Result<NaiveDateTime, ParseError> {
     if ts.len() == 10 {

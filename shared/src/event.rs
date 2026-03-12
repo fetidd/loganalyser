@@ -60,6 +60,18 @@ impl Event {
         }
     }
 
+    pub fn name(&self) -> &str {
+        match self {
+            Event::Span { name, .. } | Event::Single { name, .. } => name,
+        }
+    }
+
+    pub fn parent_id(&self) -> Option<Uuid> {
+        match self {
+            Event::Span { parent_id, .. } | Event::Single { parent_id, .. } => *parent_id,
+        }
+    }
+
     pub fn with_parent(mut self, parent_id: Uuid) -> Self {
         match &mut self {
             Event::Span { parent_id: p, .. } | Event::Single { parent_id: p, .. } => {
