@@ -1,3 +1,11 @@
+[settings]
+poll_interval_secs = 3
+
+[storage]
+storage_type = "memory"
+# connection_string = "mysql://user:pass@localhost/loganalyser"
+# connection_string = "/var/lib/loganalyser/events.db"
+
 [[parsers]]
 name = "gateway_request"
 glob = "/home/ben/loganalyser/gateway_example.log"

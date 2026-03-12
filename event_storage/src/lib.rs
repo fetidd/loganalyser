@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use shared::event::Event;
 use thiserror::Error;
 
@@ -27,9 +28,10 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub trait EventStorage {
-    fn store(&self, events: &[Event]) -> impl Future<Output = Result<()>> + Send;
-    fn load(&self, filter: Filter) -> impl Future<Output = Result<Vec<Event>>> + Send;
+#[async_trait]
+pub trait EventStorage: Send + Sync {
+    async fn store(&self, events: &[Event]) -> Result<()>;
+    async fn load(&self, filter: Filter) -> Result<Vec<Event>>;
 }
 
 #[cfg(test)]

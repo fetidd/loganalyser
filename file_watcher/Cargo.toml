@@ -7,7 +7,10 @@ edition = "2024"
 log_parser = { path = "../log_parser" }
 shared = { path = "../shared" }
 event_storage = { path = "../event_storage" }
+async-trait = "0.1"
+sqlx = { version = "0.8.6", features = ["mysql", "sqlite", "runtime-tokio-rustls"] }
 tokio = { version = "1.50.0", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
 toml = "1.0.6"
 anyhow = "1.0.102"
+serde = { version = "1", features = ["derive"] }
 glob = "0.3"

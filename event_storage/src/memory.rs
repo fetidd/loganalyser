@@ -2,6 +2,8 @@ use std::sync::{Arc, RwLock};
 
 use shared::event::Event;
 
+use async_trait::async_trait;
+
 use crate::{Error, Filter, EventStorage, Result};
 
 #[derive(Debug)]
@@ -23,29 +25,27 @@ impl Default for MemoryEventStore {
     }
 }
 
+#[async_trait]
 impl EventStorage for MemoryEventStore {
-    fn store(&self, events: &[Event]) -> impl Future<Output = Result<()>> + Send {
-        let res = match self.events.write() {
+    async fn store(&self, events: &[Event]) -> Result<()> {
+        match self.events.write() {
             Ok(mut stored) => {
-                let new_events: Vec<Event> = events.into_iter().map(|e| (*e).to_owned()).collect();
-                stored.extend(new_events);
+                stored.extend(events.iter().cloned());
                 Ok(())
             }
-            Err(error) => Err(Error::Storage(error.to_string())),
-        };
-        std::future::ready(res)
+            Err(e) => Err(Error::Storage(e.to_string())),
+        }
     }
 
-    fn load(&self, filter: Filter) -> impl Future<Output = Result<Vec<Event>>> + Send {
-        let res = match self.events.read() {
+    async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
+        match self.events.read() {
             Ok(stored) => Ok(stored
                 .iter()
                 .filter(|ev| apply_filter(ev, &filter))
                 .cloned()
                 .collect()),
             Err(e) => Err(Error::Storage(e.to_string())),
-        };
-        std::future::ready(res)
+        }
     }
 }
 

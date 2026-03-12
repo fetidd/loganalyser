@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use shared::event::Event;
 use sqlx::Row;
@@ -37,65 +38,58 @@ impl MySqlEventStore {
     }
 }
 
+#[async_trait]
 impl EventStorage for MySqlEventStore {
-    fn store(&self, events: &[Event]) -> impl Future<Output = Result<()>> + Send {
-        let pool = self.pool.clone();
-        let events = events.to_vec();
-        async move {
-            let mut tx = pool.begin().await?;
-            for event in &events {
-                let e = EventForInsert::from_event(event)?;
-                sqlx::query(EventForInsert::insert_sql())
-                    .bind(e.id)
-                    .bind(e.event_type)
-                    .bind(e.name)
-                    .bind(e.timestamp)
-                    .bind(e.duration_ms)
-                    .bind(e.parent_id)
-                    .bind(e.data_json)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-            tx.commit().await?;
-            Ok(())
+    async fn store(&self, events: &[Event]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for event in events {
+            let e = EventForInsert::from_event(event)?;
+            sqlx::query(EventForInsert::insert_sql())
+                .bind(e.id)
+                .bind(e.event_type)
+                .bind(e.name)
+                .bind(e.timestamp)
+                .bind(e.duration_ms)
+                .bind(e.parent_id)
+                .bind(e.data_json)
+                .execute(&mut *tx)
+                .await?;
         }
+        tx.commit().await?;
+        Ok(())
     }
 
-    fn load(&self, filter: Filter) -> impl Future<Output = Result<Vec<Event>>> + Send {
-        let pool = self.pool.clone();
+    async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!(
             "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data FROM events{where_sql}",
         );
-        async move {
-            let mut query = sqlx::query(&query);
-            for b in bindings {
-                query = match b {
-                    ParamValue::String(s) => query.bind(s),
-                    ParamValue::SignedNumber(n) => query.bind(n),
-                };
-            }
-            let rows = query.fetch_all(&pool).await?;
-
-            let mut events = Vec::with_capacity(rows.len());
-            for row in rows {
-                let id: Uuid = row.try_get::<String, _>("id").and_then(|s| {
-                    Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e)))
-                })?;
-                let event_type: String = row.try_get("event_type")?;
-                let name: String = row.try_get("name")?;
-                let timestamp: NaiveDateTime = row.try_get("timestamp")?;
-                let data_json: String = row.try_get("data")?;
-                let parent_id: Option<Uuid> = row
-                    .try_get::<Option<String>, _>("parent_id")?
-                    .map(|s| Uuid::parse_str(&s))
-                    .transpose()?;
-
-                let duration_ms: Option<i64> = row.try_get("duration_ms")?;
-                events.push(build_event(id, event_type, name, timestamp, data_json, parent_id, duration_ms)?);
-            }
-            Ok(events)
+        let mut query = sqlx::query(&query);
+        for b in bindings {
+            query = match b {
+                ParamValue::String(s) => query.bind(s),
+                ParamValue::SignedNumber(n) => query.bind(n),
+            };
         }
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let mut events = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: Uuid = row.try_get::<String, _>("id").and_then(|s| {
+                Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e)))
+            })?;
+            let event_type: String = row.try_get("event_type")?;
+            let name: String = row.try_get("name")?;
+            let timestamp: NaiveDateTime = row.try_get("timestamp")?;
+            let data_json: String = row.try_get("data")?;
+            let parent_id: Option<Uuid> = row
+                .try_get::<Option<String>, _>("parent_id")?
+                .map(|s| Uuid::parse_str(&s))
+                .transpose()?;
+            let duration_ms: Option<i64> = row.try_get("duration_ms")?;
+            events.push(build_event(id, event_type, name, timestamp, data_json, parent_id, duration_ms)?);
+        }
+        Ok(events)
     }
 }
 
