@@ -1,10 +1,10 @@
 use std::{collections::HashMap, io::SeekFrom, path::Path, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use serde::Deserialize;
 use event_storage::{EventStorage, MemoryEventStore, MySqlEventStore, SqliteEventStore};
 use glob::glob;
 use log_parser::parser::Parser;
+use serde::Deserialize;
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt},
@@ -22,19 +22,28 @@ impl FileWatcher {
     pub async fn new(config_path: &str) -> anyhow::Result<Self> {
         let config_file = fs::read(config_path).await?;
         let config: Config = toml::from_slice(&config_file)?;
-        let storage: Arc<dyn EventStorage> = match config.storage.storage_type {
-            StorageType::Memory => Arc::new(MemoryEventStore::new()),
-            StorageType::Mysql => {
-                let conn_str = config.storage.connection_string.as_deref()
-                    .ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
-                Arc::new(MySqlEventStore::new(sqlx::MySqlPool::connect(conn_str).await?))
-            }
-            StorageType::Sqlite => {
-                let conn_str = config.storage.connection_string.as_deref()
-                    .ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
-                Arc::new(SqliteEventStore::new(sqlx::SqlitePool::connect(conn_str).await?))
-            }
-        };
+        let storage: Arc<dyn EventStorage> =
+            match config.storage.storage_type {
+                StorageType::Memory => Arc::new(MemoryEventStore::new()),
+                StorageType::Mysql => {
+                    let conn_str =
+                        config.storage.connection_string.as_deref().ok_or_else(|| {
+                            anyhow!("connection_string required for MySQL storage")
+                        })?;
+                    Arc::new(MySqlEventStore::new(
+                        sqlx::MySqlPool::connect(conn_str).await?,
+                    ))
+                }
+                StorageType::Sqlite => {
+                    let conn_str =
+                        config.storage.connection_string.as_deref().ok_or_else(|| {
+                            anyhow!("connection_string required for SQLite storage")
+                        })?;
+                    Arc::new(SqliteEventStore::new(
+                        sqlx::SqlitePool::connect(conn_str).await?,
+                    ))
+                }
+            };
 
         let mut file_parser_map: FileParserMapping = HashMap::new();
         for p_table in config.parsers.iter().map(|v| {
@@ -52,12 +61,16 @@ impl FileWatcher {
                 *cursor_loc = file_len;
             }
         }
-
-        Ok(Self { file_parser_map, storage, settings: config.settings })
+        Ok(Self {
+            file_parser_map,
+            storage,
+            settings: config.settings,
+        })
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        let mut interval = tokio::time::interval(Duration::from_secs(self.settings.poll_interval_secs));
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(self.settings.poll_interval_secs));
         loop {
             let _ = interval.tick().await;
             for (path, (parsers, cursor_loc)) in self.file_parser_map.iter_mut() {
@@ -106,7 +119,9 @@ struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { poll_interval_secs: 3 }
+        Self {
+            poll_interval_secs: 3,
+        }
     }
 }
 
@@ -119,7 +134,10 @@ pub struct StorageConfig {
 
 impl Default for StorageConfig {
     fn default() -> Self {
-        Self { storage_type: StorageType::Memory, connection_string: None }
+        Self {
+            storage_type: StorageType::Memory,
+            connection_string: None,
+        }
     }
 }
 

@@ -2,9 +2,9 @@
 poll_interval_secs = 3
 
 [storage]
-storage_type = "memory"
+storage_type = "sqlite"
 # connection_string = "mysql://user:pass@localhost/loganalyser"
-# connection_string = "/var/lib/loganalyser/events.db"
+connection_string = "/home/ben/loganalyser/events.db"
 
 [[parsers]]
 name = "gateway_request"

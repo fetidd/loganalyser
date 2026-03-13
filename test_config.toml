@@ -1,0 +1,14 @@
+[settings]
+poll_interval_secs = 3
+
+[storage]
+storage_type = "sqlite"
+# connection_string = "mysql://user:pass@localhost/loganalyser"
+connection_string = "/home/ben/loganalyser/events.db"
+
+[[parsers]]
+name = "log1"
+glob = "/home/ben/loganalyser/*.log"
+type = "single"
+pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<data>.*)'
+timestamp_format = "%Y-%m-%d %H:%M:%S"
