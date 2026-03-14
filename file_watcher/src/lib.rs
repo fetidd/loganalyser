@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::SeekFrom, path::Path, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use event_storage::{EventStorage, MemoryEventStore, MySqlEventStore, SqliteEventStore};
+use event_storage::{make_storage, EventStorage, StorageConfig};
 use glob::glob;
 use log_parser::parser::Parser;
 use serde::Deserialize;
@@ -22,28 +22,7 @@ impl FileWatcher {
     pub async fn new(config_path: &str) -> anyhow::Result<Self> {
         let config_file = fs::read(config_path).await?;
         let config: Config = toml::from_slice(&config_file)?;
-        let storage: Arc<dyn EventStorage> =
-            match config.storage.storage_type {
-                StorageType::Memory => Arc::new(MemoryEventStore::new()),
-                StorageType::Mysql => {
-                    let conn_str =
-                        config.storage.connection_string.as_deref().ok_or_else(|| {
-                            anyhow!("connection_string required for MySQL storage")
-                        })?;
-                    Arc::new(MySqlEventStore::new(
-                        sqlx::MySqlPool::connect(conn_str).await?,
-                    ))
-                }
-                StorageType::Sqlite => {
-                    let conn_str =
-                        config.storage.connection_string.as_deref().ok_or_else(|| {
-                            anyhow!("connection_string required for SQLite storage")
-                        })?;
-                    Arc::new(SqliteEventStore::new(
-                        sqlx::SqlitePool::connect(conn_str).await?,
-                    ))
-                }
-            };
+        let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
 
         let mut file_parser_map: FileParserMapping = HashMap::new();
         for p_table in config.parsers.iter().map(|v| {
@@ -125,30 +104,6 @@ impl Default for Settings {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(default)]
-pub struct StorageConfig {
-    pub storage_type: StorageType,
-    pub connection_string: Option<String>,
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            storage_type: StorageType::Memory,
-            connection_string: None,
-        }
-    }
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum StorageType {
-    #[default]
-    Memory,
-    Mysql,
-    Sqlite,
-}
 
 async fn get_file_len(file: impl AsRef<Path>) -> anyhow::Result<u64> {
     Ok(fs::metadata(file).await?.len())

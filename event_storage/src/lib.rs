@@ -2,12 +2,14 @@ use async_trait::async_trait;
 use shared::event::Event;
 use thiserror::Error;
 
+pub mod config;
 pub mod event_filter;
 pub(crate) mod memory;
 pub(crate) mod mysql;
 pub(crate) mod sqlite;
 pub(crate) mod sql;
 
+pub use config::{make_storage, StorageConfig, StorageType};
 pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;

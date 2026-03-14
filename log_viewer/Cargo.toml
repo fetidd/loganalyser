@@ -1,0 +1,19 @@
+[package]
+name = "log_viewer"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "log_viewer"
+path = "src/main.rs"
+
+[dependencies]
+event_storage = { path = "../event_storage" }
+shared = { path = "../shared" }
+inquire = "0.7"
+tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "fs"] }
+anyhow = "1.0.102"
+serde = { version = "1", features = ["derive"] }
+toml = "1.0.6"
+chrono = "0.4"
+sqlx = { version = "0.8.6", features = ["sqlite", "mysql", "runtime-tokio-rustls"] }

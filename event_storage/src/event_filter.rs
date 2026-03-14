@@ -25,18 +25,21 @@ impl<T> Cmp<T> {
     }
 }
 
+#[derive(Clone)]
 pub enum Expr {
     Condition(Predicate),
     And(Vec<Expr>),
     Or(Vec<Expr>),
 }
 
+#[derive(Clone)]
 pub enum Predicate {
     Data(Cmp<String>),
     Timestamp(Cmp<String>),
     Id(Cmp<String>),
     ParentId(Cmp<String>),
     Duration(Cmp<i64>),
+    Name(Cmp<String>),
 }
 
 pub fn id(c: Cmp<impl Into<String>>) -> Expr {
@@ -58,6 +61,10 @@ pub fn data(field: &str, c: Cmp<impl Into<String>>) -> Expr {
 
 pub fn parent_id(c: Cmp<impl Into<String>>) -> Expr {
     Expr::Condition(Predicate::ParentId(c.map(Into::into)))
+}
+
+pub fn name(c: Cmp<impl Into<String>>) -> Expr {
+    Expr::Condition(Predicate::Name(c.map(Into::into)))
 }
 
 pub fn and(exprs: impl IntoIterator<Item = Expr>) -> Expr {
@@ -115,6 +122,10 @@ impl Filter {
     pub fn with_duration(self, cmp: Cmp<impl Into<i64>>) -> Self {
         self.and_condition(Predicate::Duration(cmp.map(Into::into)))
     }
+
+    pub fn with_name(self, cmp: Cmp<impl Into<String>>) -> Self {
+        self.and_condition(Predicate::Name(cmp.map(Into::into)))
+    }
 }
 
 impl Default for Filter {
@@ -138,6 +149,24 @@ mod tests {
     #[test]
     fn test_new_filter_has_no_expr() {
         assert!(Filter::new().expr().is_none());
+    }
+
+    #[test]
+    fn test_name_free_fn_produces_name_condition() {
+        let expr = name(Like("http%"));
+        assert!(matches!(expr, Expr::Condition(Predicate::Name(_))));
+    }
+
+    #[test]
+    fn test_with_name_produces_condition() {
+        let f = Filter::new().with_name(Like("http%"));
+        assert!(matches!(f.expr(), Some(Expr::Condition(Predicate::Name(_)))));
+    }
+
+    #[test]
+    fn test_with_name_combined_with_other_produces_and() {
+        let f = Filter::new().with_name(Like("http%")).with_timestamp(Gt("2025-01-01"));
+        assert!(matches!(f.expr(), Some(Expr::And(v)) if v.len() == 2));
     }
 
     #[test]

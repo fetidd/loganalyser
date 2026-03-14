@@ -137,6 +137,7 @@ fn build_predicate(predicate: &Predicate, params: &mut Params, dialect: &mut imp
         Predicate::Id(cmp) => build_string_column("id", cmp, params, dialect),
         Predicate::ParentId(cmp) => build_string_column("parent_id", cmp, params, dialect),
         Predicate::Duration(cmp) => build_i64_column("duration_ms", cmp, params, dialect),
+        Predicate::Name(cmp) => build_string_column("name", cmp, params, dialect),
     }
 }
 
@@ -178,6 +179,7 @@ fn build_string_column(
                 Cmp::Gt(v) => (">", v),
                 Cmp::Lte(v) => ("<=", v),
                 Cmp::Gte(v) => (">=", v),
+                Cmp::Like(v) => ("LIKE", v),
                 _ => panic!("{column} can not be filtered by {other:?}"),
             };
             let ph = dialect.placeholder();
