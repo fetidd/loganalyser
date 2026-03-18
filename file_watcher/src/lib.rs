@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::SeekFrom, path::Path, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use event_storage::{make_storage, EventStorage, StorageConfig};
+use event_storage::{EventStorage, StorageConfig, make_storage};
 use glob::glob;
 use log_parser::parser::Parser;
 use serde::Deserialize;
@@ -23,6 +23,7 @@ impl FileWatcher {
         let config_file = fs::read(config_path).await?;
         let config: Config = toml::from_slice(&config_file)?;
         let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
+        tracing::debug!("storage created");
 
         let mut file_parser_map: FileParserMapping = HashMap::new();
         for p_table in config.parsers.iter().map(|v| {
@@ -40,6 +41,7 @@ impl FileWatcher {
                 *cursor_loc = file_len;
             }
         }
+        tracing::debug!("{file_parser_map:?}");
         Ok(Self {
             file_parser_map,
             storage,
@@ -58,6 +60,7 @@ impl FileWatcher {
                     *cursor_loc = 0;
                     continue;
                 } else if file_len > *cursor_loc {
+                    tracing::debug!("{path:?} has new log lines...");
                     let mut file = fs::File::open(&path).await?;
                     file.seek(SeekFrom::Start(*cursor_loc)).await?;
                     let mut log_data = vec![];
@@ -69,8 +72,15 @@ impl FileWatcher {
                     tokio::spawn(async move {
                         for mut p in parsers {
                             let events = p.parse(&logs);
+                            tracing::debug!("found {events:?}");
                             if !events.is_empty() {
-                                let _res = storage.store(&events).await;
+                                let res = storage.store(&events).await;
+                                if res.is_err() {
+                                    tracing::error!(
+                                        "Failed to add event(s) to storage: {}",
+                                        res.unwrap_err()
+                                    );
+                                }
                             }
                         }
                     });
@@ -103,7 +113,6 @@ impl Default for Settings {
         }
     }
 }
-
 
 async fn get_file_len(file: impl AsRef<Path>) -> anyhow::Result<u64> {
     Ok(fs::metadata(file).await?.len())

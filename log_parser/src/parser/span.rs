@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDateTime;
 use regex::Regex;
+use tracing::warn;
 use uuid::Uuid;
 
 use shared::event::Event;
@@ -55,10 +56,15 @@ impl InternalSpanParser {
     ) -> Vec<Event> {
         let mut events = vec![];
         if let Some(start_captures) = self.start_pattern.captures(line) {
+            // TODO need to stop capturing with child parsers if their parent didnt capture...
             let Some(timestamp) =
                 super::extract_timestamp(&start_captures["timestamp"], &self.timestamp_format)
             else {
-                // TODO do we want to log here? Error?
+                warn!(
+                    line,
+                    format = self.timestamp_format,
+                    "failed to parse start timestamp"
+                );
                 return events;
             };
             let mut capture_names = self.start_pattern.capture_names();
@@ -74,14 +80,17 @@ impl InternalSpanParser {
             if let Some((_pending_reference, pending_span)) =
                 self.pending.0.remove_entry(&span_reference)
             {
-                let Some(end_timestamp) = super::extract_timestamp(
-                    &end_captures["timestamp"],
-                    &self.timestamp_format,
-                ) else {
-                    // TODO do we want to log here? Error?
+                let Some(end_timestamp) =
+                    super::extract_timestamp(&end_captures["timestamp"], &self.timestamp_format)
+                else {
+                    warn!(
+                        line,
+                        format = self.timestamp_format,
+                        "failed to parse end timestamp"
+                    );
                     return events;
                 };
-                data.extend(pending_span.data); // TODO chekcx if this ends up overwiritng and if we want to stop that - we want it to overwrite the timestamp because its the start timestamp we want
+                data.extend(pending_span.data);
                 let duration = end_timestamp - pending_span.timestamp;
                 events.push(Event::Span {
                     id: pending_span.id,
@@ -141,7 +150,11 @@ struct PendingSpan {
 }
 
 impl PendingSpan {
-    fn new(timestamp: NaiveDateTime, data: HashMap<String, String>, parent_id: Option<Uuid>) -> Self {
+    fn new(
+        timestamp: NaiveDateTime,
+        data: HashMap<String, String>,
+        parent_id: Option<Uuid>,
+    ) -> Self {
         Self {
             timestamp,
             data,
@@ -160,9 +173,9 @@ mod tests {
     use regex::Regex;
     use rstest::rstest;
 
-    use shared::event::Event;
     use crate::parser::InternalSingleParser;
     use crate::parser::tests::TEST_ID;
+    use shared::event::Event;
 
     use super::super::tests::common_test_data;
     use super::*;
@@ -291,10 +304,16 @@ mod tests {
         // outer span is emitted last (when END is seen)
         let outer_id = events[2].id();
         // abc01 nested: parent_id links to the outer span
-        assert!(matches!(&events[0], Event::Single { name, parent_id, .. } if name == "test_inner" && *parent_id == Some(outer_id)));
+        assert!(
+            matches!(&events[0], Event::Single { name, parent_id, .. } if name == "test_inner" && *parent_id == Some(outer_id))
+        );
         // abc02 nested: no pending span with ref=abc02, so no parent
-        assert!(matches!(&events[1], Event::Single { name, parent_id, .. } if name == "test_inner" && parent_id.is_none()));
+        assert!(
+            matches!(&events[1], Event::Single { name, parent_id, .. } if name == "test_inner" && parent_id.is_none())
+        );
         // outer span: top-level, no parent
-        assert!(matches!(&events[2], Event::Span { name, parent_id, .. } if name == "test" && parent_id.is_none()));
+        assert!(
+            matches!(&events[2], Event::Span { name, parent_id, .. } if name == "test" && parent_id.is_none())
+        );
     }
 }

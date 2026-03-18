@@ -47,6 +47,8 @@ impl Parser {
             .ok_or(error("type was not a string"))
     }
 
+    // TODO add [parser_defaults] for stuff like timestamp_format
+    // TODO make some patterns composable e.g. define timestamp's pattern as \d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d\.\d\d\d\d\d\d once and then use it in any pattern line (pattern, end_pattern, start_pattern)
     pub fn build_from_toml(t: &toml::Table) -> Result<Parser> {
         let config_type = Self::extract_config_type(t)?;
         let reference_fields: Option<Vec<String>> =
@@ -112,6 +114,9 @@ impl Parser {
         let nested_parsers = Self::parse_nested(t, ctx)?;
         let start_pattern = Regex::new(Self::parse_and_validate_str("start_pattern", t)?.into())?;
         let end_pattern = Regex::new(Self::parse_and_validate_str("end_pattern", t)?.into())?;
+        if start_pattern.as_str() == end_pattern.as_str() {
+            return Err(error("start_pattern and end_pattern must be different"));
+        }
         for pattern in [&start_pattern, &end_pattern] {
             Self::validate_required_pattern_fields(pattern, Self::REQUIRED_FIELDS)?;
             if let Some(reference_fields) = ctx.reference_fields {
@@ -621,6 +626,15 @@ end_pattern = '(?P<timestamp>.+) END'
 reference_fields = ["ref"]"#,
         "ref"
     )] // reference field not in patterns
+    #[case(
+        r#"type = "span"
+name = "t"
+timestamp_format = "%Y"
+start_pattern = '(?P<timestamp>.+) (?P<ref>\S+) SAME'
+end_pattern = '(?P<timestamp>.+) (?P<ref>\S+) SAME'
+reference_fields = ["ref"]"#,
+        "start_pattern and end_pattern must be different"
+    )] // identical start and end patterns are ambiguous
     fn test_from_toml_span_err(#[case] toml_str: &str, #[case] expected_err: &str) {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
         let err = Parser::build_from_toml(&t).unwrap_err();

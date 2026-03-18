@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use serde::Deserialize;
+use sqlx::{MySqlPool, SqlitePool, sqlite::SqliteConnectOptions};
 use std::sync::Arc;
 
 use crate::{EventStorage, MemoryEventStore, MySqlEventStore, SqliteEventStore};
@@ -38,7 +39,7 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn Even
                 .as_deref()
                 .ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
             Ok(Arc::new(MySqlEventStore::new(
-                sqlx::MySqlPool::connect(conn_str).await?,
+                MySqlPool::connect(conn_str).await?,
             )))
         }
         StorageType::Sqlite => {
@@ -46,11 +47,11 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn Even
                 .connection_string
                 .as_deref()
                 .ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
-            let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            let opts = SqliteConnectOptions::new()
                 .filename(conn_str)
                 .create_if_missing(true);
             Ok(Arc::new(SqliteEventStore::new(
-                sqlx::SqlitePool::connect_with(opts).await?,
+                SqlitePool::connect_with(opts).await?,
             )))
         }
     }

@@ -4,11 +4,23 @@ poll_interval_secs = 3
 [storage]
 storage_type = "sqlite"
 # connection_string = "mysql://user:pass@localhost/loganalyser"
-connection_string = "/data/data/com.termux/files/home/loganalyser/events.db"
+connection_string = "/home/ben/loganalyser/events.db"
 
 [[parsers]]
 name = "log1"
 glob = "/home/ben/loganalyser/*.log"
 type = "single"
 pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<data>.*)'
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[[parsers]]
+name = "log2"
+glob = "/home/ben/loganalyser/*.log"
+type = "span"
+start_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[A-Z]{3})\s+START'
+end_pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[A-Z]{3})\s+END'
+reference_fields = ["ref"]
+nested = [
+    { name = "innerlog1", type = "single", pattern = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[A-Z]{3})\s+SOMETHING HAPPENED' },
+]
 timestamp_format = "%Y-%m-%d %H:%M:%S"

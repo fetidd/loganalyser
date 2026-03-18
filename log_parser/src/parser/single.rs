@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use regex::Regex;
+use tracing::warn;
 use uuid::Uuid;
 
 use shared::event::Event;
@@ -48,7 +49,7 @@ impl InternalSingleParser {
             let Some(timestamp) =
                 super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
             else {
-                // TODO do we want to log here? Error?
+                warn!(line = input, format = self.timestamp_format, "failed to parse timestamp");
                 return None;
             };
             let mut capture_names = self.pattern.capture_names();
