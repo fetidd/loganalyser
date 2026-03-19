@@ -20,6 +20,7 @@ use crate::{EventStorage, Filter, Result};
 ///     data        TEXT    NOT NULL
 /// );
 /// ```
+#[derive(Debug)]
 pub struct SqliteEventStore {
     pool: sqlx::SqlitePool,
 }

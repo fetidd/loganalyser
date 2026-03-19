@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{EventStorage, MemoryEventStore, MySqlEventStore, SqliteEventStore};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(default)]
 pub struct StorageConfig {
     pub storage_type: StorageType,
@@ -21,7 +21,7 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageType {
     #[default]
@@ -31,16 +31,13 @@ pub enum StorageType {
 }
 
 pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn EventStorage>> {
-    match config.storage_type {
-        StorageType::Memory => Ok(Arc::new(MemoryEventStore::new())),
+    let s: Arc<dyn EventStorage> = match config.storage_type {
         StorageType::Mysql => {
             let conn_str = config
                 .connection_string
                 .as_deref()
                 .ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
-            Ok(Arc::new(MySqlEventStore::new(
-                MySqlPool::connect(conn_str).await?,
-            )))
+            Arc::new(MySqlEventStore::new(MySqlPool::connect(conn_str).await?))
         }
         StorageType::Sqlite => {
             let conn_str = config
@@ -50,9 +47,9 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn Even
             let opts = SqliteConnectOptions::new()
                 .filename(conn_str)
                 .create_if_missing(true);
-            Ok(Arc::new(SqliteEventStore::new(
-                SqlitePool::connect_with(opts).await?,
-            )))
+            Arc::new(SqliteEventStore::new(SqlitePool::connect_with(opts).await?))
         }
-    }
+        StorageType::Memory => Arc::new(MemoryEventStore::new()),
+    };
+    Ok(s)
 }

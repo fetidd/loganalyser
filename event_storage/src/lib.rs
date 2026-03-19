@@ -6,15 +6,14 @@ pub mod config;
 pub mod event_filter;
 pub(crate) mod memory;
 pub(crate) mod mysql;
-pub(crate) mod sqlite;
 pub(crate) mod sql;
+pub(crate) mod sqlite;
 
-pub use config::{make_storage, StorageConfig, StorageType};
+pub use config::{StorageConfig, StorageType, make_storage};
 pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
 pub use sqlite::SqliteEventStore;
-
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -31,7 +30,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[async_trait]
-pub trait EventStorage: Send + Sync {
+pub trait EventStorage: Send + Sync + std::fmt::Debug {
     async fn store(&self, events: &[Event]) -> Result<()>;
     async fn load(&self, filter: Filter) -> Result<Vec<Event>>;
 }
@@ -42,7 +41,7 @@ mod tests {
 
     use shared::event::Event;
 
-    use crate::{Filter, EventStorage, MemoryEventStore};
+    use crate::{EventStorage, Filter, MemoryEventStore};
 
     #[tokio::test]
     async fn test_new_in_memory_storage() {
@@ -56,10 +55,7 @@ mod tests {
             .store(&[event.clone()])
             .await
             .expect("failed to store");
-        let read = store
-            .load(Filter::new())
-            .await
-            .expect("failed to load");
+        let read = store.load(Filter::new()).await.expect("failed to load");
         assert_eq!(event, read[0]);
     }
 }

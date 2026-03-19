@@ -4,9 +4,10 @@ use shared::event::Event;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::sql::{build_event, build_where, Dialect, EventForInsert, ParamValue, Params};
+use crate::sql::{Dialect, EventForInsert, ParamValue, Params, build_event, build_where};
 use crate::{EventStorage, Filter, Result};
 
+#[derive(Debug)]
 pub struct MySqlEventStore {
     pool: sqlx::MySqlPool,
 }
@@ -75,9 +76,9 @@ impl EventStorage for MySqlEventStore {
 
         let mut events = Vec::with_capacity(rows.len());
         for row in rows {
-            let id: Uuid = row.try_get::<String, _>("id").and_then(|s| {
-                Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e)))
-            })?;
+            let id: Uuid = row
+                .try_get::<String, _>("id")
+                .and_then(|s| Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e))))?;
             let event_type: String = row.try_get("event_type")?;
             let name: String = row.try_get("name")?;
             let timestamp: NaiveDateTime = row.try_get("timestamp")?;
@@ -87,7 +88,15 @@ impl EventStorage for MySqlEventStore {
                 .map(|s| Uuid::parse_str(&s))
                 .transpose()?;
             let duration_ms: Option<i64> = row.try_get("duration_ms")?;
-            events.push(build_event(id, event_type, name, timestamp, data_json, parent_id, duration_ms)?);
+            events.push(build_event(
+                id,
+                event_type,
+                name,
+                timestamp,
+                data_json,
+                parent_id,
+                duration_ms,
+            )?);
         }
         Ok(events)
     }
@@ -109,7 +118,7 @@ impl EventStorage for MySqlEventStore {
 /// ```
 #[cfg(test)]
 mod tests {
-    use crate::event_filter::{and, data, id, or, timestamp, Cmp::*};
+    use crate::event_filter::{Cmp::*, and, data, id, or, timestamp};
     use crate::sql::{ParamValue, Params};
 
     use super::*;
@@ -214,6 +223,9 @@ mod tests {
     ) {
         let mut expected_params = Params::new();
         expected_params.add(&expected.0, &expected.1);
-        assert_eq!(MySqlEventStore::get_where_sql(&filter.into()), expected_params);
+        assert_eq!(
+            MySqlEventStore::get_where_sql(&filter.into()),
+            expected_params
+        );
     }
 }

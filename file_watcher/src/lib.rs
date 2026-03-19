@@ -1,6 +1,5 @@
 use std::{collections::HashMap, io::SeekFrom, path::Path, sync::Arc, time::Duration};
 
-use anyhow::anyhow;
 use event_storage::{EventStorage, StorageConfig, make_storage};
 use glob::glob;
 use log_parser::parser::Parser;
@@ -10,34 +9,28 @@ use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
 };
 
-type FileParserMapping = HashMap<std::path::PathBuf, (Vec<Parser>, u64)>;
-
 pub struct FileWatcher {
     file_parser_map: FileParserMapping,
     storage: Arc<dyn EventStorage>,
     settings: Settings,
 }
 
-impl FileWatcher {
-    pub async fn new(config_path: &str) -> anyhow::Result<Self> {
-        let config_file = fs::read(config_path).await?;
-        let config: Config = toml::from_slice(&config_file)?;
-        let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
-        tracing::debug!("storage created");
+type FileParserMapping = HashMap<std::path::PathBuf, (Vec<Parser>, u64)>;
 
+impl FileWatcher {
+    pub async fn new(config_file: Vec<u8>) -> anyhow::Result<Self> {
+        let config: Config = toml::from_slice(&config_file)?;
+        tracing::debug!("config created: {config:?}");
+        let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
+        tracing::debug!("storage created: {storage:?}");
+        let built_parsers = Parser::from_config_file(&config_file)?;
         let mut file_parser_map: FileParserMapping = HashMap::new();
-        for p_table in config.parsers.iter().map(|v| {
-            v.as_table()
-                .ok_or_else(|| anyhow!("parsers should be tables"))
-        }) {
-            let p_table = p_table?;
-            let parser = Parser::build_from_toml(p_table)?;
-            let pattern = get_str(p_table, "glob")?;
-            for entry in glob(pattern)? {
+        for (pattern, parsers) in built_parsers.into_iter() {
+            for entry in glob(&pattern)? {
                 let path = entry?;
                 let file_len = get_file_len(&path).await?;
-                let (parsers, cursor_loc) = file_parser_map.entry(path).or_default();
-                parsers.push(parser.clone());
+                let (bound_parsers, cursor_loc) = file_parser_map.entry(path).or_default();
+                bound_parsers.extend_from_slice(parsers.as_slice());
                 *cursor_loc = file_len;
             }
         }
@@ -67,40 +60,34 @@ impl FileWatcher {
                     file.read_to_end(&mut log_data).await?;
                     *cursor_loc = get_file_len(path).await?;
                     let logs = String::from_utf8_lossy(&log_data).to_string();
-                    let parsers = parsers.clone();
-                    let storage = Arc::clone(&self.storage);
-                    tokio::spawn(async move {
-                        for mut p in parsers {
-                            let events = p.parse(&logs);
-                            tracing::debug!("found {events:?}");
-                            if !events.is_empty() {
-                                let res = storage.store(&events).await;
-                                if res.is_err() {
-                                    tracing::error!(
-                                        "Failed to add event(s) to storage: {}",
-                                        res.unwrap_err()
-                                    );
-                                }
+                    let mut all_events = vec![];
+                    for p in parsers.iter_mut() {
+                        all_events.extend(p.parse(&logs));
+                    }
+                    tracing::debug!("found {all_events:?}");
+                    if !all_events.is_empty() {
+                        let storage = Arc::clone(&self.storage);
+                        tokio::spawn(async move {
+                            if let Err(e) = storage.store(&all_events).await {
+                                tracing::error!("Failed to add event(s) to storage: {e}");
                             }
-                        }
-                    });
+                        });
+                    }
                 }
             }
         }
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct Config {
     #[serde(default)]
     settings: Settings,
     #[serde(default)]
     storage: StorageConfig,
-    #[serde(default)]
-    parsers: Vec<toml::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(default)]
 struct Settings {
     poll_interval_secs: u64,
@@ -116,12 +103,4 @@ impl Default for Settings {
 
 async fn get_file_len(file: impl AsRef<Path>) -> anyhow::Result<u64> {
     Ok(fs::metadata(file).await?.len())
-}
-
-fn get_str<'a>(table: &'a toml::Table, key: &str) -> anyhow::Result<&'a str> {
-    table
-        .get(key)
-        .ok_or_else(|| anyhow!("missing '{key}'"))?
-        .as_str()
-        .ok_or_else(|| anyhow!("'{key}' should be a string"))
 }
