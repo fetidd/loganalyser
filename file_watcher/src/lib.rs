@@ -67,11 +67,7 @@ impl FileWatcher {
                     tracing::debug!("found {all_events:?}");
                     if !all_events.is_empty() {
                         let storage = Arc::clone(&self.storage);
-                        tokio::spawn(async move {
-                            if let Err(e) = storage.store(&all_events).await {
-                                tracing::error!("Failed to add event(s) to storage: {e}");
-                            }
-                        });
+                        tokio::spawn(store_with_retry(storage, all_events));
                     }
                 }
             }
@@ -97,6 +93,21 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             poll_interval_secs: 3,
+        }
+    }
+}
+
+async fn store_with_retry(storage: Arc<dyn EventStorage>, events: Vec<shared::event::Event>) {
+    let mut delay = Duration::from_millis(100);
+    for attempt in 1..=5_u32 {
+        match storage.store(&events).await {
+            Ok(()) => return,
+            Err(e) if attempt < 5 => {
+                tracing::warn!("store attempt {attempt}/5 failed: {e}, retrying in {delay:?}");
+                tokio::time::sleep(delay).await;
+                delay *= 2;
+            }
+            Err(e) => tracing::error!("failed to store events after 5 attempts: {e}"),
         }
     }
 }
