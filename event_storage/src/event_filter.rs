@@ -75,6 +75,7 @@ pub fn or(exprs: impl IntoIterator<Item = Expr>) -> Expr {
     Expr::Or(exprs.into_iter().collect())
 }
 
+#[derive(Default)]
 pub struct Filter {
     expr: Option<Expr>,
 }
@@ -128,11 +129,6 @@ impl Filter {
     }
 }
 
-impl Default for Filter {
-    fn default() -> Self {
-        Self { expr: None }
-    }
-}
 
 impl From<Expr> for Filter {
     fn from(expr: Expr) -> Self {

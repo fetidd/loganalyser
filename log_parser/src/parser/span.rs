@@ -111,7 +111,7 @@ impl InternalSpanParser {
                     let matches = reference_fields
                         .iter()
                         .zip(span_ref.0.iter())
-                        .all(|(field, value)| data.get(field).map_or(false, |v| v == value));
+                        .all(|(field, value)| data.get(field) == Some(value));
                     matches.then_some(pending_span.id)
                 })
             };

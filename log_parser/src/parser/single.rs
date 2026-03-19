@@ -27,11 +27,8 @@ impl InternalSingleParser {
         lookup: &dyn Fn(&HashMap<String, String>) -> Option<Uuid>,
     ) -> Option<Event> {
         if let Some(captures) = self.pattern.captures(input) {
-            let Some(timestamp) =
-                super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
-            else {
-                return None;
-            };
+            let timestamp =
+                super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)?;
             let mut capture_names = self.pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &captures);
             let parent_id = lookup(&data);
@@ -49,7 +46,11 @@ impl InternalSingleParser {
             let Some(timestamp) =
                 super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
             else {
-                warn!(line = input, format = self.timestamp_format, "failed to parse timestamp");
+                warn!(
+                    line = input,
+                    format = self.timestamp_format,
+                    "failed to parse timestamp"
+                );
                 return None;
             };
             let mut capture_names = self.pattern.capture_names();
@@ -66,8 +67,8 @@ mod tests {
     use regex::Regex;
     use rstest::rstest;
 
-    use shared::event::Event;
     use crate::parser::tests::TEST_ID;
+    use shared::event::Event;
 
     use super::super::tests::common_test_data;
     use super::*;

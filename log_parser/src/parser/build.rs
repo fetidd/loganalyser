@@ -38,7 +38,7 @@ struct ParserDefaults {
 }
 
 impl Parser {
-    pub fn from_config_file(config_file: &Vec<u8>) -> Result<HashMap<String, Vec<Parser>>> {
+    pub fn from_config_file(config_file: &[u8]) -> Result<HashMap<String, Vec<Parser>>> {
         let config: Config = toml::from_slice(config_file)?;
         tracing::debug!("created parser config: {config:?}");
         let mut parsers: HashMap<String, Vec<Parser>> = HashMap::new();
@@ -68,7 +68,7 @@ impl Parser {
                 reference_fields
                     .as_array()
                     .ok_or(error("reference_fields not an array"))?
-                    .into_iter()
+                    .iter()
                     .map(|v| match v.as_str() {
                         Some(s) => Ok(s.to_owned()),
                         None => Err(error("reference_fields elements must be strings")),
@@ -107,10 +107,10 @@ impl Parser {
     }
 
     fn parse_and_validate_str<'a>(field: &str, t: &'a toml::Table) -> Result<&'a str> {
-        Ok(t.get(field)
+        t.get(field)
             .ok_or(error(&format!("missing {field}")))?
             .as_str()
-            .ok_or(error(&format!("{field} was not a string")))?)
+            .ok_or(error(&format!("{field} was not a string")))
     }
 
     const REQUIRED_FIELDS: [&str; 1] = ["timestamp"];
