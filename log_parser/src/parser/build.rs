@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use regex::Regex;
 use serde::Deserialize;
+use shared::env::expand_map_vars;
 
 use crate::error::{Error, Result};
 
@@ -133,27 +134,15 @@ impl Parser {
         components: &HashMap<String, String>,
         t: &toml::Table,
     ) -> Result<Regex> {
-        // TODO unittest!
         let field = if !prefix.is_empty() {
             format!("{prefix}_pattern")
         } else {
             "pattern".to_string()
         };
-        let mut pattern = Self::parse_and_validate_str(&field, t)?.to_string();
-        for (var, replacement) in components {
-            let var = format!("{{{{{var}}}}}");
-            let mut searched_to = 0_usize;
-            while searched_to < pattern.len() {
-                if let Some(mut i) = pattern[searched_to..].find(&var) {
-                    i += searched_to;
-                    pattern.replace_range(i..i + var.len(), replacement);
-                    searched_to = i + replacement.len();
-                } else {
-                    break;
-                }
-            }
-        }
-        Ok(Regex::new(&pattern)?)
+        let raw = Self::parse_and_validate_str(&field, t)?;
+        let expanded = expand_map_vars(raw, components)
+            .map_err(|e| error(&e.to_string()))?;
+        Ok(Regex::new(&expanded)?)
     }
 
     fn build_span(t: &toml::Table, name: &str, ctx: &ParserBuildContext<'_>) -> Result<Parser> {
@@ -276,6 +265,74 @@ mod tests {
     fn build(toml_str: &str) -> Result<Parser> {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
         Parser::build_from_toml_and_config(&t, &Config::default())
+    }
+
+    fn build_with_components(toml_str: &str, components: HashMap<String, String>) -> Result<Parser> {
+        let t: toml::Table = toml::from_str(toml_str).unwrap();
+        let config = Config { components, ..Config::default() };
+        Parser::build_from_toml_and_config(&t, &config)
+    }
+
+    #[rstest]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y"
+pattern = '(?P<timestamp>${ts}) (?P<level>${level})'"#,
+        HashMap::from([("ts".to_string(), r"\d+".to_string()), ("level".to_string(), r"\w+".to_string())]),
+        vec!["timestamp", "level"]
+    )]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y"
+pattern = '(?P<timestamp>${ts})'"#,
+        HashMap::from([("ts".to_string(), r"\d+".to_string()), ("unused".to_string(), "x".to_string())]),
+        vec!["timestamp"]
+    )]
+    fn test_parse_pattern_substitution(
+        #[case] toml_str: &str,
+        #[case] components: HashMap<String, String>,
+        #[case] expected_captures: Vec<&str>,
+    ) {
+        let parser = build_with_components(toml_str, components).unwrap();
+        let Parser::Single(p) = parser else { panic!("expected Single") };
+        for cap in expected_captures {
+            assert!(
+                p.pattern.capture_names().any(|c| c == Some(cap)),
+                "expected capture group '{cap}' in pattern {}",
+                p.pattern
+            );
+        }
+    }
+
+    #[rstest]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y"
+pattern = '(?P<timestamp>${missing})'"#,
+        HashMap::new(),
+        "missing"
+    )]
+    #[case(
+        r#"type = "single"
+name = "t"
+timestamp_format = "%Y"
+pattern = '(?P<timestamp>${unclosed)'"#,
+        HashMap::new(),
+        "unclosed"
+    )]
+    fn test_parse_pattern_expansion_err(
+        #[case] toml_str: &str,
+        #[case] components: HashMap<String, String>,
+        #[case] expected_in_err: &str,
+    ) {
+        let err = build_with_components(toml_str, components).unwrap_err();
+        assert!(
+            err.to_string().contains(expected_in_err),
+            "expected error containing {expected_in_err:?}, got: {err}"
+        );
     }
 
     const SINGLE_VALID: &str = r#"

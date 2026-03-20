@@ -17,31 +17,15 @@ impl InternalSingleParser {
     pub(super) fn parse(&mut self, input: &str) -> Vec<Event> {
         input
             .lines()
-            .filter_map(|line| self.parse_line(line))
+            .filter_map(|line| self.parse_line_with_context(line, None))
             .collect()
     }
 
     pub(super) fn parse_line_with_context(
         &mut self,
         input: &str,
-        lookup: &dyn Fn(&HashMap<String, String>) -> Option<Uuid>,
+        lookup: Option<&dyn Fn(&HashMap<String, String>) -> Option<Uuid>>,
     ) -> Option<Event> {
-        if let Some(captures) = self.pattern.captures(input) {
-            let timestamp =
-                super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)?;
-            let mut capture_names = self.pattern.capture_names();
-            let data = super::extract_data(&mut capture_names, &captures);
-            let parent_id = lookup(&data);
-            let mut event = Event::new_single(&self.name, timestamp, data);
-            if let Some(pid) = parent_id {
-                event = event.with_parent(pid);
-            }
-            return Some(event);
-        }
-        None
-    }
-
-    pub(super) fn parse_line(&mut self, input: &str) -> Option<Event> {
         if let Some(captures) = self.pattern.captures(input) {
             let Some(timestamp) =
                 super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
@@ -55,7 +39,18 @@ impl InternalSingleParser {
             };
             let mut capture_names = self.pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &captures);
-            return Some(Event::new_single(&self.name, timestamp, data));
+            let parent_id = match lookup {
+                None => None,
+                Some(f) => match f(&data) {
+                    Some(id) => Some(id),
+                    None => return None, // nested but no matching parent span → suppress
+                },
+            };
+            let mut event = Event::new_single(&self.name, timestamp, data);
+            if let Some(pid) = parent_id {
+                event = event.with_parent(pid);
+            }
+            return Some(event);
         }
         None
     }
@@ -161,7 +156,7 @@ mod tests {
             pattern: Regex::new(pattern).unwrap(),
             timestamp_format: TS_FMT.into(),
         };
-        let actual = parser.parse_line(line);
+        let actual = parser.parse_line_with_context(line, None);
         if [&actual, &expected].into_iter().all(Option::is_some) {
             let (mut actual, expected) = (actual.unwrap(), expected.unwrap());
             set_id(&mut actual, TEST_ID);

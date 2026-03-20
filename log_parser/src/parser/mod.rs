@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use shared::event::Event;
 
-
 #[derive(Debug, Clone)]
 pub enum Parser {
     Single(InternalSingleParser),
@@ -44,7 +43,7 @@ impl Parser {
     fn parse_line_with_context(
         &mut self,
         line: &str,
-        lookup: &dyn Fn(&HashMap<String, String>) -> Option<Uuid>,
+        lookup: Option<&dyn Fn(&HashMap<String, String>) -> Option<Uuid>>,
     ) -> Vec<Event> {
         match self {
             Parser::Single(internal) => internal

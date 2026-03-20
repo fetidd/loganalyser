@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use serde::Deserialize;
+use shared::env::expand_env_vars;
 use sqlx::{MySqlPool, SqlitePool, sqlite::SqliteConnectOptions};
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ pub enum StorageType {
     Sqlite,
 }
 
+
 pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn EventStorage>> {
     let s: Arc<dyn EventStorage> = match config.storage_type {
         StorageType::Mysql => {
@@ -37,15 +39,17 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn Even
                 .connection_string
                 .as_deref()
                 .ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
-            Arc::new(MySqlEventStore::new(MySqlPool::connect(conn_str).await?))
+            let conn_str = expand_env_vars(conn_str)?;
+            Arc::new(MySqlEventStore::new(MySqlPool::connect(&conn_str).await?))
         }
         StorageType::Sqlite => {
             let conn_str = config
                 .connection_string
                 .as_deref()
                 .ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
+            let conn_str = expand_env_vars(conn_str)?;
             let opts = SqliteConnectOptions::new()
-                .filename(conn_str)
+                .filename(&conn_str)
                 .create_if_missing(true);
             Arc::new(SqliteEventStore::new(SqlitePool::connect_with(opts).await?))
         }
