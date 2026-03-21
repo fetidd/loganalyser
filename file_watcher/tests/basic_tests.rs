@@ -116,17 +116,17 @@ __ = '\s+'
 name = "single_event"
 glob = "LOG_PATH"
 type = "single"
-pattern = '{{timestamp}}{{__}}LOG{{__}}(?P<data>.*)'
+pattern = '${timestamp}${__}LOG${__}(?P<data>.*)'
 
 [[parsers]]
 name = "span_event"
 glob = "LOG_PATH"
 type = "span"
-start_pattern = '{{timestamp}}{{__}}{{ref}}{{__}}START'
-end_pattern = '{{timestamp}}{{__}}{{ref}}{{__}}END'
+start_pattern = '${timestamp}${__}${ref}${__}START'
+end_pattern = '${timestamp}${__}${ref}${__}END'
 reference_fields = ["ref"]
 nested = [
-    { name = "span_inner", type = "single", pattern = '{{timestamp}}{{__}}{{ref}}{{__}}NOTE{{__}}(?P<note>.*)' },
+    { name = "span_inner", type = "single", pattern = '${timestamp}${__}${ref}${__}NOTE${__}(?P<note>.*)' },
 ]
 "#;
 
