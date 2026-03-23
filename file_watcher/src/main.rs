@@ -1,5 +1,11 @@
 use file_watcher::FileWatcher;
-use tokio::fs;
+use tokio::{
+    fs,
+    signal::{
+        ctrl_c,
+        unix::{SignalKind, signal},
+    },
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -8,6 +14,14 @@ async fn main() -> anyhow::Result<()> {
         .nth(1)
         .ok_or(anyhow::anyhow!("Usage: file_watcher <config_path>"))?;
     let config_file = fs::read(config_path).await?;
-    let mut watcher = FileWatcher::new(config_file).await?;
-    watcher.run().await
+    // watcher.run().await
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let mut watcher = FileWatcher::new(config_file).await?.with_receiver(rx);
+    let main_join_handle = tokio::spawn(async move { watcher.run().await });
+    let mut sigterm = signal(SignalKind::terminate())?;
+    tokio::select! {
+        _ = sigterm.recv() => { let _ = tx.send(true); }
+        _ = ctrl_c() => { let _ = tx.send(true); }
+    }
+    main_join_handle.await?
 }

@@ -81,10 +81,12 @@ impl Parser {
             } else {
                 None
             };
-        let timestamp_format = if let Some(default_tsf) = &config.defaults.timestamp_format {
+        let timestamp_format = if t.get("timestamp_format").is_some() {
+            Self::parse_and_validate_str("timestamp_format", t)?
+        } else if let Some(default_tsf) = &config.defaults.timestamp_format {
             default_tsf
         } else {
-            Self::parse_and_validate_str("timestamp_format", t)?
+            return Err(error("missing timestamp_format")); // TODO could we attempt to use the timestamp regex to determine the format?
         };
         let ctx = ParserBuildContext {
             timestamp_format,

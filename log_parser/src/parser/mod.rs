@@ -4,6 +4,7 @@ mod span;
 
 use std::collections::HashMap;
 
+use chrono::NaiveDateTime;
 use regex::{CaptureNames, Captures};
 
 pub use single::InternalSingleParser;
@@ -51,6 +52,30 @@ impl Parser {
                 .into_iter()
                 .collect(),
             Parser::Span(internal) => internal.parse_line_with_context(line, lookup),
+        }
+    }
+
+    pub fn pending_spans(
+        &self,
+    ) -> Vec<(
+        Vec<String>,
+        Uuid,
+        NaiveDateTime,
+        HashMap<String, String>,
+        Option<Uuid>,
+    )> {
+        match self {
+            Parser::Single(_) => vec![],
+            Parser::Span(p) => p.pending_spans(),
+        }
+    }
+
+    pub fn restore_pending(
+        &mut self,
+        spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>)>,
+    ) {
+        if let Parser::Span(p) = self {
+            p.restore_pending(spans);
         }
     }
 }

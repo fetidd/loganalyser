@@ -4,6 +4,7 @@ use shared::env::expand_env_vars;
 use sqlx::{MySqlPool, SqlitePool, sqlite::SqliteConnectOptions};
 use std::sync::Arc;
 
+use crate::pending::{MemoryPendingSpanStorage, PendingSpanStorage, SqlitePendingSpanStorage};
 use crate::{EventStorage, MemoryEventStore, MySqlEventStore, SqliteEventStore};
 
 #[derive(Deserialize, Debug)]
@@ -31,6 +32,28 @@ pub enum StorageType {
     Sqlite,
 }
 
+
+pub async fn make_pending_storage(
+    config: &StorageConfig,
+) -> anyhow::Result<Arc<dyn PendingSpanStorage>> {
+    let s: Arc<dyn PendingSpanStorage> = match config.storage_type {
+        StorageType::Sqlite => {
+            let conn_str = config
+                .connection_string
+                .as_deref()
+                .ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
+            let conn_str = expand_env_vars(conn_str)?;
+            let opts = SqliteConnectOptions::new()
+                .filename(&conn_str)
+                .create_if_missing(true);
+            Arc::new(SqlitePendingSpanStorage::new(
+                SqlitePool::connect_with(opts).await?,
+            ))
+        }
+        StorageType::Memory | StorageType::Mysql => Arc::new(MemoryPendingSpanStorage),
+    };
+    Ok(s)
+}
 
 pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn EventStorage>> {
     let s: Arc<dyn EventStorage> = match config.storage_type {

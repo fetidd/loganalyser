@@ -9,7 +9,7 @@ shared = { path = "../shared" }
 event_storage = { path = "../event_storage" }
 async-trait = "0.1"
 sqlx = { version = "0.8.6", features = ["mysql", "sqlite", "runtime-tokio-rustls"] }
-tokio = { version = "1.50.0", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
+tokio = { version = "1.50.0", features = ["fs", "macros", "rt-multi-thread", "time", "io-util", "signal"] }
 toml = "1.0.6"
 anyhow = "1.0.102"
 serde = { version = "1", features = ["derive"] }

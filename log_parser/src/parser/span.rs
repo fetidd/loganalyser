@@ -17,7 +17,7 @@ pub struct InternalSpanParser {
     pub end_pattern: Regex,
     pub nested: Vec<Parser>,
     pub reference_fields: Vec<String>,
-    pending: PendingSpans,
+    pub(super) pending: PendingSpans,
 }
 
 impl InternalSpanParser {
@@ -132,13 +132,63 @@ impl InternalSpanParser {
             .flat_map(|line| self.parse_line_with_context(line, None))
             .collect()
     }
+
+    pub fn has_pending(&self) -> bool {
+        !self.pending.0.is_empty()
+    }
+
+    pub fn pending_spans(
+        &self,
+    ) -> Vec<(
+        Vec<String>,
+        Uuid,
+        NaiveDateTime,
+        HashMap<String, String>,
+        Option<Uuid>,
+    )> {
+        self.pending
+            .0
+            .iter()
+            .map(
+                |(
+                    span_ref,
+                    PendingSpan {
+                        id,
+                        timestamp,
+                        data,
+                        parent_id,
+                    },
+                )| {
+                    (
+                        span_ref.0.clone(),
+                        *id,
+                        *timestamp,
+                        data.clone(),
+                        *parent_id,
+                    )
+                },
+            )
+            .collect()
+    }
+
+    pub fn restore_pending(
+        &mut self,
+        spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>)>,
+    ) {
+        for (span_ref_parts, id, timestamp, data, parent_id) in spans {
+            self.pending.0.insert(
+                SpanReference(span_ref_parts),
+                PendingSpan { id, timestamp, data, parent_id },
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct SpanReference(Vec<String>);
 
 #[derive(Debug, Clone)]
-struct PendingSpan {
+pub(crate) struct PendingSpan {
     id: Uuid,
     timestamp: NaiveDateTime,
     data: HashMap<String, String>,
@@ -161,7 +211,7 @@ impl PendingSpan {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct PendingSpans(HashMap<SpanReference, PendingSpan>);
+pub(crate) struct PendingSpans(HashMap<SpanReference, PendingSpan>);
 
 #[cfg(test)]
 mod tests {

@@ -1,21 +1,29 @@
-use std::{collections::HashMap, io::SeekFrom, path::Path, sync::Arc, time::Duration};
+use std::{collections::HashMap, io::SeekFrom, path::Path, path::PathBuf, sync::Arc, time::Duration};
 
-use event_storage::{EventStorage, StorageConfig, make_storage};
+use event_storage::{
+    EventStorage, PendingSpanRecord, PendingSpanStorage, StorageConfig, make_pending_storage,
+    make_storage,
+};
 use glob::glob;
 use log_parser::parser::Parser;
 use serde::Deserialize;
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt},
+    sync::oneshot::Receiver,
+    time::{Instant, MissedTickBehavior},
 };
+use tracing::warn;
 
 pub struct FileWatcher {
     file_parser_map: FileParserMapping,
     storage: Arc<dyn EventStorage>,
+    pending_storage: Arc<dyn PendingSpanStorage>,
     settings: Settings,
+    rx: Option<Receiver<bool>>,
 }
 
-type FileParserMapping = HashMap<std::path::PathBuf, (Vec<Parser>, u64)>;
+type FileParserMapping = HashMap<PathBuf, (Vec<Parser>, u64)>;
 
 impl FileWatcher {
     pub async fn new(config_file: Vec<u8>) -> anyhow::Result<Self> {
@@ -23,6 +31,7 @@ impl FileWatcher {
         tracing::debug!("config created: {config:?}");
         let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
         tracing::debug!("storage created: {storage:?}");
+        let pending_storage = make_pending_storage(&config.storage).await?;
         let built_parsers = Parser::from_config_file(&config_file)?;
         let mut file_parser_map: FileParserMapping = HashMap::new();
         for (pattern, parsers) in built_parsers.into_iter() {
@@ -34,20 +43,61 @@ impl FileWatcher {
                 *cursor_loc = file_len;
             }
         }
+
+        // Restore any pending spans that were in-flight when the watcher last stopped.
+        let pending_records = pending_storage.load().await?;
+        let mut by_file_parser: HashMap<(String, String), Vec<_>> = HashMap::new();
+        for r in pending_records {
+            by_file_parser
+                .entry((r.file_path, r.parser_name))
+                .or_default()
+                .push((r.span_ref, r.id, r.timestamp, r.data, r.parent_id));
+        }
+        for (path, (parsers, _)) in file_parser_map.iter_mut() {
+            let path_str = path.to_string_lossy().to_string();
+            for p in parsers.iter_mut() {
+                let key = (path_str.clone(), p.name().to_string());
+                if let Some(spans) = by_file_parser.remove(&key) {
+                    p.restore_pending(spans);
+                }
+            }
+        }
+
         tracing::debug!("{file_parser_map:?}");
         Ok(Self {
             file_parser_map,
             storage,
+            pending_storage,
             settings: config.settings,
+            rx: None,
         })
     }
 
+    pub fn with_receiver(mut self, rx: Receiver<bool>) -> Self {
+        self.rx = Some(rx);
+        self
+    }
+
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        let mut interval =
-            tokio::time::interval(Duration::from_secs(self.settings.poll_interval_secs));
-        loop {
-            let _ = interval.tick().await;
-            for (path, (parsers, cursor_loc)) in self.file_parser_map.iter_mut() {
+        let Self {
+            file_parser_map,
+            storage,
+            pending_storage,
+            settings,
+            rx,
+        } = self;
+        let mut interval = tokio::time::interval(Duration::from_secs(settings.poll_interval_secs));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        'main: loop {
+            if let Some(rx) = rx
+                && rx.try_recv().is_ok()
+            {
+                println!("exiting...");
+                break 'main;
+            }
+            let t = interval.tick().await;
+            let before_parse = Instant::now();
+            for (path, (parsers, cursor_loc)) in file_parser_map.iter_mut() {
                 let file_len = get_file_len(path).await?;
                 if file_len < *cursor_loc {
                     *cursor_loc = 0;
@@ -58,20 +108,45 @@ impl FileWatcher {
                     file.seek(SeekFrom::Start(*cursor_loc)).await?;
                     let mut log_data = vec![];
                     file.read_to_end(&mut log_data).await?;
-                    *cursor_loc = get_file_len(path).await?;
                     let logs = String::from_utf8_lossy(&log_data).to_string();
+                    let path_str = path.to_string_lossy().to_string();
                     let mut all_events = vec![];
                     for p in parsers.iter_mut() {
                         all_events.extend(p.parse(&logs));
+
+                        // Persist pending spans after each parse so they survive restarts.
+                        let records: Vec<PendingSpanRecord> = p
+                            .pending_spans()
+                            .into_iter()
+                            .map(|(span_ref, id, timestamp, data, parent_id)| PendingSpanRecord {
+                                file_path: path_str.clone(),
+                                parser_name: p.name().to_string(),
+                                span_ref,
+                                id,
+                                timestamp,
+                                data,
+                                parent_id,
+                            })
+                            .collect();
+                        let ps = Arc::clone(pending_storage);
+                        let fp = path_str.clone();
+                        let pn = p.name().to_string();
+                        tokio::spawn(shared::async_retry!(ps.save(&fp, &pn, &records)));
                     }
                     tracing::debug!("found {all_events:?}");
                     if !all_events.is_empty() {
-                        let storage = Arc::clone(&self.storage);
-                        tokio::spawn(store_with_retry(storage, all_events));
+                        let s = Arc::clone(storage);
+                        tokio::spawn(shared::async_retry!(s.store(&all_events)));
                     }
+                    *cursor_loc = get_file_len(path).await?;
                 }
             }
+            let d = t.duration_since(before_parse);
+            if d > Duration::from_secs(self.settings.poll_interval_secs) {
+                warn!("processing time exceeded polling interval!");
+            }
         }
+        Ok(())
     }
 }
 
@@ -93,21 +168,6 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             poll_interval_secs: 3,
-        }
-    }
-}
-
-async fn store_with_retry(storage: Arc<dyn EventStorage>, events: Vec<shared::event::Event>) {
-    let mut delay = Duration::from_millis(100);
-    for attempt in 1..=5_u32 {
-        match storage.store(&events).await {
-            Ok(()) => return,
-            Err(e) if attempt < 5 => {
-                tracing::warn!("store attempt {attempt}/5 failed: {e}, retrying in {delay:?}");
-                tokio::time::sleep(delay).await;
-                delay *= 2;
-            }
-            Err(e) => tracing::error!("failed to store events after 5 attempts: {e}"),
         }
     }
 }

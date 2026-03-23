@@ -24,9 +24,9 @@ pattern = '${timestamp}${__}(?P<data>.*)'
 name = "log2"
 glob = "/home/ben/loganalyser/*.log"
 type = "span"
-start_pattern = '${timestamp}${}__}${ref}${}__}START'
-end_pattern = '${timestamp}${}__}${ref}${}__}END'
+start_pattern = '${timestamp}${__}${ref}${__}START'
+end_pattern = '${timestamp}${__}${ref}${__}END'
 reference_fields = ["ref"]
 nested = [
-    { name = "innerlog1", type = "single", pattern = '${timestamp}${}__}${ref}${}__}SOMETHING HAPPENED' },
+    { name = "innerlog1", type = "single", pattern = '${timestamp}${__}${ref}${__}SOMETHING HAPPENED' },
 ]

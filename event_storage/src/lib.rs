@@ -4,15 +4,17 @@ use thiserror::Error;
 
 pub mod config;
 pub mod event_filter;
+pub mod pending;
 pub(crate) mod memory;
 pub(crate) mod mysql;
 pub(crate) mod sql;
 pub(crate) mod sqlite;
 
-pub use config::{StorageConfig, StorageType, make_storage};
+pub use config::{StorageConfig, StorageType, make_pending_storage, make_storage};
 pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
+pub use pending::{MemoryPendingSpanStorage, PendingSpanRecord, PendingSpanStorage, SqlitePendingSpanStorage};
 pub use sqlite::SqliteEventStore;
 
 #[derive(Debug, Error)]
