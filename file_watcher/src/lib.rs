@@ -1,4 +1,6 @@
-use std::{collections::HashMap, io::SeekFrom, path::Path, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap, io::SeekFrom, path::Path, path::PathBuf, sync::Arc, time::Duration,
+};
 
 use event_storage::{EventStorage, PendingSpanRecord, StorageConfig, make_storage};
 use glob::glob;
@@ -38,7 +40,6 @@ impl FileWatcher {
                 *cursor_loc = file_len;
             }
         }
-
         // Restore any pending spans that were in-flight when the watcher last stopped.
         // Also restore the file cursor so content written during downtime is not skipped.
         let saved_cursors = storage.load_file_cursors().await?;
@@ -112,25 +113,28 @@ impl FileWatcher {
                     let new_cursor = get_file_len(path).await?;
                     for p in parsers.iter_mut() {
                         all_events.extend(p.parse(&logs));
-
                         // Persist pending spans after each parse so they survive restarts.
                         let records: Vec<PendingSpanRecord> = p
                             .pending_spans()
                             .into_iter()
-                            .map(|(span_ref, id, timestamp, data, parent_id)| PendingSpanRecord {
-                                file_path: path_str.clone(),
-                                parser_name: p.name().to_string(),
-                                span_ref,
-                                id,
-                                timestamp,
-                                data,
-                                parent_id,
-                            })
+                            .map(
+                                |(span_ref, id, timestamp, data, parent_id)| PendingSpanRecord {
+                                    file_path: path_str.clone(),
+                                    parser_name: p.name().to_string(),
+                                    span_ref,
+                                    id,
+                                    timestamp,
+                                    data,
+                                    parent_id,
+                                },
+                            )
                             .collect();
                         let s = Arc::clone(storage);
                         let fp = path_str.clone();
                         let pn = p.name().to_string();
-                        tokio::spawn(shared::async_retry!(s.save_pending(&fp, &pn, &records, new_cursor)));
+                        tokio::spawn(shared::async_retry!(
+                            s.save_pending(&fp, &pn, &records, new_cursor)
+                        ));
                     }
                     tracing::debug!("found {all_events:?}");
                     if !all_events.is_empty() {

@@ -1,54 +1,30 @@
-use std::sync::{Arc, RwLock};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use std::str::FromStr;
 
-use shared::event::Event;
+use crate::SqliteEventStore;
 
-use async_trait::async_trait;
-
-use crate::{Error, Filter, EventStorage, Result};
-
-#[derive(Debug)]
-pub struct MemoryEventStore {
-    events: Arc<RwLock<Vec<Event>>>,
-}
-
-impl MemoryEventStore {
-    pub fn new() -> Self {
-        Self {
-            events: Arc::new(RwLock::new(vec![])),
-        }
+/// An in-memory event store backed by a single-connection SQLite `:memory:` database.
+///
+/// `max_connections(1)` + `min_connections(1)` + disabled timeouts force sqlx to
+/// hold exactly one connection open for the pool's lifetime, so the in-memory
+/// database persists as long as the store exists.
+impl SqliteEventStore {
+    pub async fn new_in_memory() -> Self {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .connect_with(
+                SqliteConnectOptions::from_str(":memory:")
+                    .expect("valid :memory: connection string")
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("failed to open in-memory SQLite");
+        SqliteEventStore::from_pool(pool).await
     }
 }
 
-impl Default for MemoryEventStore {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl EventStorage for MemoryEventStore {
-    async fn store(&self, events: &[Event]) -> Result<()> {
-        match self.events.write() {
-            Ok(mut stored) => {
-                stored.extend(events.iter().cloned());
-                Ok(())
-            }
-            Err(e) => Err(Error::Storage(e.to_string())),
-        }
-    }
-
-    async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
-        match self.events.read() {
-            Ok(stored) => Ok(stored
-                .iter()
-                .filter(|ev| apply_filter(ev, &filter))
-                .cloned()
-                .collect()),
-            Err(e) => Err(Error::Storage(e.to_string())),
-        }
-    }
-}
-
-fn apply_filter(_event: &Event, _filter: &Filter) -> bool {
-    true
-}
+/// Type alias so existing code using `MemoryEventStore` continues to compile.
+pub type MemoryEventStore = SqliteEventStore;

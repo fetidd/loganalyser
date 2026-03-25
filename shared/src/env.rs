@@ -1,4 +1,42 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// Returns a platform-appropriate path for the loganalyser SQLite state file.
+///
+/// - Linux/macOS: `/var/lib/loganalyser/state.db` if writable, otherwise
+///   `~/.local/share/loganalyser/state.db` (or `%LOCALAPPDATA%\loganalyser\state.db` on Windows).
+/// - Fallback when no home dir is detectable: `/tmp/loganalyser/state.db`.
+///
+/// This function only computes the path — it does **not** create directories.
+pub fn default_state_db_path() -> PathBuf {
+    #[cfg(unix)]
+    {
+        // Probe whether /var/lib/loganalyser is writable by trying to create it
+        // and then touching a sentinel file.
+        let var_lib = PathBuf::from("/var/lib/loganalyser");
+        if std::fs::create_dir_all(&var_lib).is_ok() {
+            let sentinel = var_lib.join(".write_check");
+            if std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&sentinel)
+                .is_ok()
+            {
+                let _ = std::fs::remove_file(sentinel);
+                return var_lib.join("state.db");
+            }
+        }
+    }
+
+    // Windows, macOS, and Linux fallback: user data directory.
+    if let Some(data_dir) = dirs::data_local_dir() {
+        return data_dir.join("loganalyser").join("state.db");
+    }
+
+    // Last resort (headless server with no HOME).
+    PathBuf::from("/tmp/loganalyser/state.db")
+}
 
 /// Expands `${VAR}` placeholders in `s` using the provided lookup function.
 ///

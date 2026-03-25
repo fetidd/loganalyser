@@ -40,7 +40,7 @@ pub struct SqliteEventStore {
 }
 
 impl SqliteEventStore {
-    pub async fn new(pool: sqlx::SqlitePool) -> Self {
+    pub async fn from_pool(pool: sqlx::SqlitePool) -> Self {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS events (\
                 id TEXT NOT NULL PRIMARY KEY, \

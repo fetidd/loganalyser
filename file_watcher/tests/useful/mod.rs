@@ -63,6 +63,7 @@ pub async fn setup(config: &str) -> TestEnv {
     let storage = make_storage(&StorageConfig {
         storage_type: StorageType::Sqlite,
         connection_string: Some(db_file_path.to_str().unwrap().to_string()),
+        state_db_path: None,
     })
     .await
     .unwrap();

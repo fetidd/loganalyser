@@ -72,7 +72,7 @@ mod tests {
             shared::datetime_from("2026-01-01").unwrap(),
             HashMap::new(),
         );
-        let store = MemoryEventStore::new();
+        let store = MemoryEventStore::new_in_memory().await;
         store
             .store(&[event.clone()])
             .await
