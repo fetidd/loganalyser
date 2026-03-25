@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use shared::event::Event;
 use thiserror::Error;
@@ -10,11 +12,11 @@ pub(crate) mod mysql;
 pub(crate) mod sql;
 pub(crate) mod sqlite;
 
-pub use config::{StorageConfig, StorageType, make_pending_storage, make_storage};
+pub use config::{StorageConfig, StorageType, make_storage};
 pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
-pub use pending::{MemoryPendingSpanStorage, PendingSpanRecord, PendingSpanStorage, SqlitePendingSpanStorage};
+pub use pending::PendingSpanRecord;
 pub use sqlite::SqliteEventStore;
 
 #[derive(Debug, Error)]
@@ -35,6 +37,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub trait EventStorage: Send + Sync + std::fmt::Debug {
     async fn store(&self, events: &[Event]) -> Result<()>;
     async fn load(&self, filter: Filter) -> Result<Vec<Event>>;
+
+    async fn save_pending(
+        &self,
+        _file_path: &str,
+        _parser_name: &str,
+        _records: &[PendingSpanRecord],
+        _cursor: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
+        Ok(vec![])
+    }
+
+    async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
+        Ok(HashMap::new())
+    }
 }
 
 #[cfg(test)]

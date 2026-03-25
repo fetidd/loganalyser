@@ -1,9 +1,6 @@
 use std::{collections::HashMap, io::SeekFrom, path::Path, path::PathBuf, sync::Arc, time::Duration};
 
-use event_storage::{
-    EventStorage, PendingSpanRecord, PendingSpanStorage, StorageConfig, make_pending_storage,
-    make_storage,
-};
+use event_storage::{EventStorage, PendingSpanRecord, StorageConfig, make_storage};
 use glob::glob;
 use log_parser::parser::Parser;
 use serde::Deserialize;
@@ -18,7 +15,6 @@ use tracing::warn;
 pub struct FileWatcher {
     file_parser_map: FileParserMapping,
     storage: Arc<dyn EventStorage>,
-    pending_storage: Arc<dyn PendingSpanStorage>,
     settings: Settings,
     rx: Option<Receiver<bool>>,
 }
@@ -31,7 +27,6 @@ impl FileWatcher {
         tracing::debug!("config created: {config:?}");
         let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
         tracing::debug!("storage created: {storage:?}");
-        let pending_storage = make_pending_storage(&config.storage).await?;
         let built_parsers = Parser::from_config_file(&config_file)?;
         let mut file_parser_map: FileParserMapping = HashMap::new();
         for (pattern, parsers) in built_parsers.into_iter() {
@@ -45,20 +40,25 @@ impl FileWatcher {
         }
 
         // Restore any pending spans that were in-flight when the watcher last stopped.
-        let pending_records = pending_storage.load().await?;
-        let mut by_file_parser: HashMap<(String, String), Vec<_>> = HashMap::new();
-        for r in pending_records {
-            by_file_parser
-                .entry((r.file_path, r.parser_name))
-                .or_default()
-                .push((r.span_ref, r.id, r.timestamp, r.data, r.parent_id));
-        }
-        for (path, (parsers, _)) in file_parser_map.iter_mut() {
-            let path_str = path.to_string_lossy().to_string();
-            for p in parsers.iter_mut() {
-                let key = (path_str.clone(), p.name().to_string());
-                if let Some(spans) = by_file_parser.remove(&key) {
-                    p.restore_pending(spans);
+        // Also restore the file cursor so content written during downtime is not skipped.
+        let saved_cursors = storage.load_file_cursors().await?;
+        for record in storage.load_pending().await? {
+            let path = PathBuf::from(&record.file_path);
+            if let Some((parsers, cursor_loc)) = file_parser_map.get_mut(&path) {
+                // Rewind the cursor to the saved position so the watcher re-reads
+                // any content that arrived while it was down, but never past the
+                // current file length (in case the file was truncated/rotated).
+                if let Some(&saved) = saved_cursors.get(&record.file_path) {
+                    *cursor_loc = saved.min(*cursor_loc);
+                }
+                if let Some(p) = parsers.iter_mut().find(|p| p.name() == record.parser_name) {
+                    p.restore_pending(vec![(
+                        record.span_ref,
+                        record.id,
+                        record.timestamp,
+                        record.data,
+                        record.parent_id,
+                    )]);
                 }
             }
         }
@@ -67,7 +67,6 @@ impl FileWatcher {
         Ok(Self {
             file_parser_map,
             storage,
-            pending_storage,
             settings: config.settings,
             rx: None,
         })
@@ -82,7 +81,6 @@ impl FileWatcher {
         let Self {
             file_parser_map,
             storage,
-            pending_storage,
             settings,
             rx,
         } = self;
@@ -111,6 +109,7 @@ impl FileWatcher {
                     let logs = String::from_utf8_lossy(&log_data).to_string();
                     let path_str = path.to_string_lossy().to_string();
                     let mut all_events = vec![];
+                    let new_cursor = get_file_len(path).await?;
                     for p in parsers.iter_mut() {
                         all_events.extend(p.parse(&logs));
 
@@ -128,10 +127,10 @@ impl FileWatcher {
                                 parent_id,
                             })
                             .collect();
-                        let ps = Arc::clone(pending_storage);
+                        let s = Arc::clone(storage);
                         let fp = path_str.clone();
                         let pn = p.name().to_string();
-                        tokio::spawn(shared::async_retry!(ps.save(&fp, &pn, &records)));
+                        tokio::spawn(shared::async_retry!(s.save_pending(&fp, &pn, &records, new_cursor)));
                     }
                     tracing::debug!("found {all_events:?}");
                     if !all_events.is_empty() {

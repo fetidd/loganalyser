@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 pub struct TestEnv {
     _temp_dir: tempfile::TempDir, // kept alive so the directory isn't deleted mid-test
     pub log_file_path: PathBuf,
+    config_file_path: PathBuf,
     pub storage: Arc<dyn event_storage::EventStorage>,
     jh: JoinHandle<()>,
 }
@@ -17,6 +18,27 @@ pub struct TestEnv {
 impl Drop for TestEnv {
     fn drop(&mut self) {
         self.jh.abort();
+    }
+}
+
+impl TestEnv {
+    /// Kills the running watcher without restarting it.
+    pub fn kill(&self) {
+        self.jh.abort();
+    }
+
+    /// Kills the running watcher and starts a fresh one from the same config.
+    /// Sleeps briefly after the abort to let cancellation propagate before
+    /// the new watcher is initialised (and sets its cursor).
+    pub async fn restart(&mut self) {
+        self.jh.abort();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut watcher = FileWatcher::new(std::fs::read(&self.config_file_path).unwrap())
+            .await
+            .unwrap();
+        self.jh = tokio::spawn(async move {
+            watcher.run().await.expect("watcher run failed");
+        });
     }
 }
 
@@ -44,20 +66,13 @@ pub async fn setup(config: &str) -> TestEnv {
     })
     .await
     .unwrap();
-    // The table is created asynchronously inside SqliteEventStore::new — wait
-    // until a query succeeds before handing the env to the test.
-    let ready = wait_until(
-        || {
-            let storage = Arc::clone(&storage);
-            async move { storage.load(Filter::new()).await.is_ok() }
-        },
-        Duration::from_secs(5),
-    )
-    .await;
-    assert!(ready, "timed out waiting for events table to be created");
+    // Verify both tables are accessible before handing the env to the test.
+    storage.load(Filter::new()).await.expect("events table not ready");
+    storage.load_pending().await.expect("pending_spans table not ready");
     TestEnv {
         _temp_dir: temp_dir,
         log_file_path,
+        config_file_path,
         storage,
         jh,
     }
