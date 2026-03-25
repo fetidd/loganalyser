@@ -30,40 +30,10 @@ impl FileWatcher {
         let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
         tracing::debug!("storage created: {storage:?}");
         let built_parsers = Parser::from_config_file(&config_file)?;
-        let mut file_parser_map: FileParserMapping = HashMap::new();
-        for (pattern, parsers) in built_parsers.into_iter() {
-            for entry in glob(&pattern)? {
-                let path = entry?;
-                let file_len = get_file_len(&path).await?;
-                let (bound_parsers, cursor_loc) = file_parser_map.entry(path).or_default();
-                bound_parsers.extend_from_slice(parsers.as_slice());
-                *cursor_loc = file_len;
-            }
-        }
-        // Restore any pending spans that were in-flight when the watcher last stopped.
-        // Also restore the file cursor so content written during downtime is not skipped.
+        let mut file_parser_map = build_file_parser_map(built_parsers).await?;
         let saved_cursors = storage.load_file_cursors().await?;
-        for record in storage.load_pending().await? {
-            let path = PathBuf::from(&record.file_path);
-            if let Some((parsers, cursor_loc)) = file_parser_map.get_mut(&path) {
-                // Rewind the cursor to the saved position so the watcher re-reads
-                // any content that arrived while it was down, but never past the
-                // current file length (in case the file was truncated/rotated).
-                if let Some(&saved) = saved_cursors.get(&record.file_path) {
-                    *cursor_loc = saved.min(*cursor_loc);
-                }
-                if let Some(p) = parsers.iter_mut().find(|p| p.name() == record.parser_name) {
-                    p.restore_pending(vec![(
-                        record.span_ref,
-                        record.id,
-                        record.timestamp,
-                        record.data,
-                        record.parent_id,
-                    )]);
-                }
-            }
-        }
-
+        let pending = storage.load_pending().await?;
+        restore_pending_state(&mut file_parser_map, pending, &saved_cursors);
         tracing::debug!("{file_parser_map:?}");
         Ok(Self {
             file_parser_map,
@@ -86,7 +56,7 @@ impl FileWatcher {
             rx,
         } = self;
         let mut interval = tokio::time::interval(Duration::from_secs(settings.poll_interval_secs));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         'main: loop {
             if let Some(rx) = rx
                 && rx.try_recv().is_ok()
@@ -94,7 +64,7 @@ impl FileWatcher {
                 println!("exiting...");
                 break 'main;
             }
-            let t = interval.tick().await;
+            interval.tick().await;
             let before_parse = Instant::now();
             for (path, (parsers, cursor_loc)) in file_parser_map.iter_mut() {
                 let file_len = get_file_len(path).await?;
@@ -144,12 +114,65 @@ impl FileWatcher {
                     *cursor_loc = get_file_len(path).await?;
                 }
             }
-            let d = t.duration_since(before_parse);
-            if d > Duration::from_secs(self.settings.poll_interval_secs) {
+            if before_parse.elapsed() > Duration::from_secs(self.settings.poll_interval_secs) {
                 warn!("processing time exceeded polling interval!");
             }
         }
         Ok(())
+    }
+}
+
+/// Expands glob patterns, reads current file lengths, and builds a
+/// `FileParserMapping` with cursors initialised to end-of-file.
+///
+/// Multiple patterns that match the same file have their parser lists merged.
+async fn build_file_parser_map(
+    patterns: HashMap<String, Vec<Parser>>,
+) -> anyhow::Result<FileParserMapping> {
+    let mut map = FileParserMapping::default();
+    for (pattern, parsers) in patterns {
+        for entry in glob(&pattern)? {
+            let path = entry?;
+            let file_len = get_file_len(&path).await?;
+            let (bound_parsers, cursor_loc) = map.entry(path).or_default();
+            bound_parsers.extend(parsers.clone());
+            *cursor_loc = file_len;
+        }
+    }
+    Ok(map)
+}
+
+/// Restores pending span state and rewinds file cursors after a watcher restart.
+///
+/// For each pending span record:
+/// - If a saved cursor exists for the file, the cursor is rewound to
+///   `min(saved, current)` so content written during downtime is re-read.
+/// - The span is restored into the matching parser so it can be completed
+///   when its END line is eventually encountered.
+///
+/// Records whose path or parser name are not present in the map are silently
+/// ignored (they refer to config that has since been removed).
+fn restore_pending_state(
+    file_parser_map: &mut FileParserMapping,
+    pending: Vec<PendingSpanRecord>,
+    saved_cursors: &HashMap<String, u64>,
+) {
+    for record in pending {
+        let path = PathBuf::from(&record.file_path);
+        if let Some((parsers, cursor_loc)) = file_parser_map.get_mut(&path) {
+            if let Some(&saved) = saved_cursors.get(&record.file_path) {
+                *cursor_loc = saved.min(*cursor_loc);
+            }
+            if let Some(p) = parsers.iter_mut().find(|p| p.name() == record.parser_name) {
+                p.restore_pending(vec![(
+                    record.span_ref,
+                    record.id,
+                    record.timestamp,
+                    record.data,
+                    record.parent_id,
+                )]);
+            }
+        }
     }
 }
 
@@ -177,4 +200,311 @@ impl Default for Settings {
 
 async fn get_file_len(file: impl AsRef<Path>) -> anyhow::Result<u64> {
     Ok(fs::metadata(file).await?.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use chrono::NaiveDateTime;
+    use event_storage::PendingSpanRecord;
+    use log_parser::parser::Parser;
+    use uuid::Uuid;
+
+    use super::{FileParserMapping, build_file_parser_map, restore_pending_state};
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn single_parser(name: &str) -> Parser {
+        let config = format!(
+            r#"
+[defaults]
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[[parsers]]
+name = "{name}"
+glob = "*.log"
+type = "single"
+pattern = '(?P<timestamp>\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}:\d{{2}}) (?P<data>.*)'
+"#
+        );
+        Parser::from_config_file(config.as_bytes())
+            .unwrap()
+            .into_iter()
+            .flat_map(|(_, p)| p)
+            .next()
+            .unwrap()
+    }
+
+    fn span_parser(name: &str) -> Parser {
+        let config = format!(
+            r#"
+[defaults]
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[[parsers]]
+name = "{name}"
+glob = "*.log"
+type = "span"
+start_pattern = '(?P<timestamp>\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}:\d{{2}}) (?P<ref>[A-Z]+) START'
+end_pattern = '(?P<timestamp>\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}:\d{{2}}) (?P<ref>[A-Z]+) END'
+reference_fields = ["ref"]
+"#
+        );
+        Parser::from_config_file(config.as_bytes())
+            .unwrap()
+            .into_iter()
+            .flat_map(|(_, p)| p)
+            .next()
+            .unwrap()
+    }
+
+    fn map_with_span_parser(path: &str, parser_name: &str, cursor: u64) -> FileParserMapping {
+        let mut map = FileParserMapping::default();
+        map.insert(
+            PathBuf::from(path),
+            (vec![span_parser(parser_name)], cursor),
+        );
+        map
+    }
+
+    fn pending_record(file_path: &str, parser_name: &str, span_ref: &str) -> PendingSpanRecord {
+        PendingSpanRecord {
+            file_path: file_path.to_string(),
+            parser_name: parser_name.to_string(),
+            span_ref: vec![span_ref.to_string()],
+            id: Uuid::new_v4(),
+            timestamp: NaiveDateTime::parse_from_str("2026-01-01 12:00:00", "%Y-%m-%d %H:%M:%S")
+                .unwrap(),
+            data: HashMap::from([("ref".to_string(), span_ref.to_string())]),
+            parent_id: None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // build_file_parser_map
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn build_map_empty_input_gives_empty_map() {
+        let map = build_file_parser_map(HashMap::new()).await.unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_map_single_entry_sets_parser_and_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.log");
+        std::fs::write(&path, "hello world\n").unwrap(); // 12 bytes
+
+        let pattern = path.to_str().unwrap().to_string();
+        let patterns = HashMap::from([(pattern, vec![single_parser("p1")])]);
+
+        let map = build_file_parser_map(patterns).await.unwrap();
+
+        let (parsers, cursor) = &map[&path];
+        assert_eq!(parsers.len(), 1);
+        assert_eq!(parsers[0].name(), "p1");
+        assert_eq!(*cursor, 12);
+    }
+
+    #[tokio::test]
+    async fn build_map_cursor_set_to_current_file_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.log");
+        std::fs::write(&path, "abc").unwrap(); // 3 bytes
+
+        let pattern = path.to_str().unwrap().to_string();
+        let patterns = HashMap::from([(pattern, vec![single_parser("p1")])]);
+
+        let map = build_file_parser_map(patterns).await.unwrap();
+
+        assert_eq!(map[&path].1, 3);
+    }
+
+    #[tokio::test]
+    async fn build_map_merges_parsers_for_same_path_matched_by_two_patterns() {
+        // Two patterns that both match the same file — parsers from each are merged.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.log");
+        std::fs::write(&path, "").unwrap();
+
+        let path_str = path.to_str().unwrap().to_string();
+        // Use the exact path string as both patterns (both match the same file).
+        let mut patterns: HashMap<String, Vec<Parser>> = HashMap::new();
+        patterns.insert(path_str.clone(), vec![single_parser("single_p")]);
+        // A glob wildcard pattern that also matches the same file.
+        let glob_pattern = dir.path().join("*.log").to_str().unwrap().to_string();
+        patterns.insert(glob_pattern, vec![span_parser("span_p")]);
+
+        let map = build_file_parser_map(patterns).await.unwrap();
+
+        assert_eq!(map.len(), 1);
+        let (parsers, _) = &map[&path];
+        assert_eq!(parsers.len(), 2);
+        let names: Vec<&str> = parsers.iter().map(|p| p.name()).collect();
+        assert!(names.contains(&"single_p"));
+        assert!(names.contains(&"span_p"));
+    }
+
+    #[tokio::test]
+    async fn build_map_separate_entries_for_different_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path_a = dir.path().join("a.log");
+        let path_b = dir.path().join("b.log");
+        std::fs::write(&path_a, "aa").unwrap(); // 2 bytes
+        std::fs::write(&path_b, "bbbb").unwrap(); // 4 bytes
+
+        let patterns = HashMap::from([
+            (
+                path_a.to_str().unwrap().to_string(),
+                vec![single_parser("p1")],
+            ),
+            (
+                path_b.to_str().unwrap().to_string(),
+                vec![single_parser("p2")],
+            ),
+        ]);
+
+        let map = build_file_parser_map(patterns).await.unwrap();
+
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&path_a].0[0].name(), "p1");
+        assert_eq!(map[&path_a].1, 2);
+        assert_eq!(map[&path_b].0[0].name(), "p2");
+        assert_eq!(map[&path_b].1, 4);
+    }
+
+    #[tokio::test]
+    async fn build_map_pattern_with_no_matches_adds_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        // Pattern points at a non-existent file.
+        let pattern = dir.path().join("*.log").to_str().unwrap().to_string();
+        let patterns = HashMap::from([(pattern, vec![single_parser("p1")])]);
+
+        let map = build_file_parser_map(patterns).await.unwrap();
+
+        assert!(map.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // restore_pending_state
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn restore_rewinds_cursor_to_saved_when_saved_is_less() {
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 100);
+        let saved = HashMap::from([(path.to_string(), 30u64)]);
+
+        restore_pending_state(&mut map, vec![pending_record(path, "sp", "ABC")], &saved);
+
+        assert_eq!(map[&PathBuf::from(path)].1, 30);
+    }
+
+    #[test]
+    fn restore_cursor_stays_when_saved_is_greater_than_current() {
+        // min(200, 50) = 50 — a saved cursor can't advance the position.
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 50);
+        let saved = HashMap::from([(path.to_string(), 200u64)]);
+
+        restore_pending_state(&mut map, vec![pending_record(path, "sp", "ABC")], &saved);
+
+        assert_eq!(map[&PathBuf::from(path)].1, 50);
+    }
+
+    #[test]
+    fn restore_cursor_unchanged_when_no_saved_entry() {
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 75);
+
+        restore_pending_state(
+            &mut map,
+            vec![pending_record(path, "sp", "ABC")],
+            &HashMap::new(),
+        );
+
+        assert_eq!(map[&PathBuf::from(path)].1, 75);
+    }
+
+    #[test]
+    fn restore_installs_pending_span_into_matching_parser() {
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 0);
+
+        restore_pending_state(
+            &mut map,
+            vec![pending_record(path, "sp", "ABC")],
+            &HashMap::new(),
+        );
+
+        assert_eq!(map[&PathBuf::from(path)].0[0].pending_spans().len(), 1);
+    }
+
+    #[test]
+    fn restore_ignores_record_with_unknown_path() {
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 50);
+
+        restore_pending_state(
+            &mut map,
+            vec![pending_record("/logs/other.log", "sp", "ABC")],
+            &HashMap::new(),
+        );
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(map[&PathBuf::from(path)].0[0].pending_spans().len(), 0);
+        assert_eq!(map[&PathBuf::from(path)].1, 50); // cursor untouched
+    }
+
+    #[test]
+    fn restore_ignores_record_with_unknown_parser_name() {
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 0);
+
+        restore_pending_state(
+            &mut map,
+            vec![pending_record(path, "does_not_exist", "ABC")],
+            &HashMap::new(),
+        );
+
+        assert_eq!(map[&PathBuf::from(path)].0[0].pending_spans().len(), 0);
+    }
+
+    #[test]
+    fn restore_multiple_records_restores_all_spans_and_rewinds_cursor_once() {
+        let path = "/logs/test.log";
+        let mut map = map_with_span_parser(path, "sp", 100);
+        let records = vec![
+            pending_record(path, "sp", "ABC"),
+            pending_record(path, "sp", "DEF"),
+        ];
+        let saved = HashMap::from([(path.to_string(), 40u64)]);
+
+        restore_pending_state(&mut map, records, &saved);
+
+        let (parsers, cursor) = &map[&PathBuf::from(path)];
+        assert_eq!(parsers[0].pending_spans().len(), 2);
+        assert_eq!(*cursor, 40);
+    }
+
+    #[test]
+    fn restore_only_rewinds_files_that_have_pending_records() {
+        // path_b has a saved cursor but no pending records — its cursor must not change.
+        let path_a = "/logs/a.log";
+        let path_b = "/logs/b.log";
+        let mut map = FileParserMapping::default();
+        map.insert(PathBuf::from(path_a), (vec![span_parser("sp")], 100));
+        map.insert(PathBuf::from(path_b), (vec![span_parser("sp")], 200));
+        let saved = HashMap::from([(path_a.to_string(), 10u64), (path_b.to_string(), 20u64)]);
+
+        restore_pending_state(&mut map, vec![pending_record(path_a, "sp", "ABC")], &saved);
+
+        assert_eq!(map[&PathBuf::from(path_a)].1, 10); // rewound
+        assert_eq!(map[&PathBuf::from(path_b)].1, 200); // untouched
+    }
 }
