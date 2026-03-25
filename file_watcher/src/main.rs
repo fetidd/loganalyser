@@ -20,8 +20,8 @@ async fn main() -> anyhow::Result<()> {
     let main_join_handle = tokio::spawn(async move { watcher.run().await });
     let mut sigterm = signal(SignalKind::terminate())?;
     tokio::select! {
-        _ = sigterm.recv() => { let _ = tx.send(true); }
-        _ = ctrl_c() => { let _ = tx.send(true); }
+        _ = sigterm.recv() => { println!("exiting..."); let _ = tx.send(true); }
+        _ = ctrl_c() => { println!("exiting..."); let _ = tx.send(true); }
     }
     main_join_handle.await?
 }

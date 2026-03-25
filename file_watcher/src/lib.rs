@@ -61,7 +61,6 @@ impl FileWatcher {
             if let Some(rx) = rx
                 && rx.try_recv().is_ok()
             {
-                println!("exiting...");
                 break 'main;
             }
             interval.tick().await;
