@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}loganalyser{% endblock %}
+{% block content %}
+<h1>loganalyser</h1>
+<p class="subtitle">Structured log exploration — file watching, filtering, span tracing.</p>
+
+<div class="card-grid">
+  <a class="card" href="/events">
+    <div class="card-icon">≡</div>
+    <h2>Log Viewer</h2>
+    <p>Paginated list of events. Filter by time range, level, name, and data fields.</p>
+  </a>
+
+  <a class="card" href="/tail">
+    <div class="card-icon">▶</div>
+    <h2>Live Tail</h2>
+    <p>Real-time stream of incoming events over SSE. Apply a filter to narrow the feed.</p>
+  </a>
+
+  <a class="card" href="/spans">
+    <div class="card-icon">◈</div>
+    <h2>Span Waterfall</h2>
+    <p>Given a parent event ID, show all child spans as a trace waterfall diagram.</p>
+  </a>
+
+  <a class="card" href="/charts">
+    <div class="card-icon">◎</div>
+    <h2>Charts</h2>
+    <p>Error rate over time. p50 / p95 / p99 span duration. Time-bucketed aggregations.</p>
+  </a>
+
+  <a class="card" href="/searches">
+    <div class="card-icon">✦</div>
+    <h2>Saved Searches</h2>
+    <p>Store a named filter and recall it instantly from any view.</p>
+  </a>
+</div>
+{% endblock %}

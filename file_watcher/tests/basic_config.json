@@ -1,0 +1,39 @@
+{
+  "settings": {
+    "poll_interval_secs": 1
+  },
+  "storage": {
+    "storage_type": "sqlite",
+    "connection_string": "/var/lib/loganalyser/state.db"
+  },
+  "defaults": {
+    "timestamp_format": "%Y-%m-%d %H:%M:%S"
+  },
+  "components": {
+    "timestamp": "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}",
+    "ref": "[A-Z]{3}"
+  },
+  "parsers": [
+    {
+      "name": "single_event",
+      "glob": "/var/log/app/*.log",
+      "type": "single",
+      "pattern": "${timestamp} LOG (?P<data>.*)"
+    },
+    {
+      "name": "span_event",
+      "glob": "/var/log/app/*.log",
+      "type": "span",
+      "start_pattern": "${timestamp} ${ref}   START",
+      "end_pattern": "${timestamp} ${ref}   END",
+      "reference_fields": ["ref"],
+      "nested": [
+        {
+          "name": "span_inner",
+          "type": "single",
+          "pattern": "${timestamp} ${ref} NOTE (?P<note>.*)"
+        }
+      ]
+    }
+  ]
+}

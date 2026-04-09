@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::LazyCell, collections::HashMap};
 
 use regex::Regex;
 use serde::Deserialize;
@@ -40,7 +40,8 @@ struct ParserDefaults {
 
 impl Parser {
     pub fn from_config_file(config_file: &[u8]) -> Result<HashMap<String, Vec<Parser>>> {
-        let config: Config = toml::from_slice(config_file)?;
+        let mut config: Config = toml::from_slice(config_file)?;
+        update_config_components(&mut config.components);
         tracing::debug!("created parser config: {config:?}");
         let mut parsers: HashMap<String, Vec<Parser>> = HashMap::new();
         for p_table in config.parsers.iter().map(|v| {
@@ -141,9 +142,9 @@ impl Parser {
         } else {
             "pattern".to_string()
         };
-        let raw = Self::parse_and_validate_str(&field, t)?;
-        let expanded = expand_map_vars(raw, components)
-            .map_err(|e| error(&e.to_string()))?;
+        let mut raw = Self::parse_and_validate_str(&field, t)?.to_string();
+        replace_whitespace_with_regex(&mut raw);
+        let expanded = expand_map_vars(&raw, components).map_err(|e| error(&e.to_string()))?;
         Ok(Regex::new(&expanded)?)
     }
 
@@ -253,6 +254,18 @@ impl Parser {
     }
 }
 
+fn update_config_components(components: &mut HashMap<String, String>) {
+    components
+        .iter_mut()
+        .filter(|(_k, v)| !v.starts_with("(?P<"))
+        .for_each(|(k, v)| *v = format!("(?P<{k}>{v})"));
+}
+
+const WHITESPACE: LazyCell<Regex> = std::cell::LazyCell::new(|| Regex::new(r"\s+").unwrap());
+fn replace_whitespace_with_regex(s: &mut String) {
+    *s = WHITESPACE.replace_all(s, r"\s+").to_string();
+}
+
 fn error(msg: &str) -> Error {
     Error::ConfigParse(msg.to_string())
 }
@@ -269,9 +282,15 @@ mod tests {
         Parser::build_from_toml_and_config(&t, &Config::default())
     }
 
-    fn build_with_components(toml_str: &str, components: HashMap<String, String>) -> Result<Parser> {
+    fn build_with_components(
+        toml_str: &str,
+        components: HashMap<String, String>,
+    ) -> Result<Parser> {
         let t: toml::Table = toml::from_str(toml_str).unwrap();
-        let config = Config { components, ..Config::default() };
+        let config = Config {
+            components,
+            ..Config::default()
+        };
         Parser::build_from_toml_and_config(&t, &config)
     }
 
@@ -298,7 +317,9 @@ pattern = '(?P<timestamp>${ts})'"#,
         #[case] expected_captures: Vec<&str>,
     ) {
         let parser = build_with_components(toml_str, components).unwrap();
-        let Parser::Single(p) = parser else { panic!("expected Single") };
+        let Parser::Single(p) = parser else {
+            panic!("expected Single")
+        };
         for cap in expected_captures {
             assert!(
                 p.pattern.capture_names().any(|c| c == Some(cap)),
@@ -874,5 +895,46 @@ nested = [{ type = "span", name = "inner", start_pattern = '(?P<timestamp>.+) (?
         let parser = build(toml_str).unwrap();
         assert_eq!(parser.name(), expected_name);
         assert_eq!(parser.timestamp_format(), expected_ts_fmt);
+    }
+
+    #[rstest]
+    #[case(
+        HashMap::from([]),
+        HashMap::from([])
+    )]
+    #[case(
+        HashMap::from([
+            ("requestreference".into(), r"(?P<requestreference>W\d{2}-\d+-\S{8})".into()),
+            ("transactionreference".into(), r"W\d{2}-\d+-\S{8}".into()),
+        ]),
+        HashMap::from([
+            ("requestreference".into(), r"(?P<requestreference>W\d{2}-\d+-\S{8})".into()),
+            ("transactionreference".into(), r"(?P<transactionreference>W\d{2}-\d+-\S{8})".into()),
+        ]),
+    )]
+    fn test_update_config_components(
+        #[case] mut components: HashMap<String, String>,
+        #[case] expected: HashMap<String, String>,
+    ) {
+        update_config_components(&mut components);
+        assert_eq!(components, expected);
+    }
+
+    #[rstest]
+    #[case(
+        String::from("${timestamp} ${requestreference}"),
+        String::from(r"${timestamp}\s+${requestreference}")
+    )]
+    #[case(
+        String::from("${timestamp}      ${requestreference}"),
+        String::from(r"${timestamp}\s+${requestreference}")
+    )]
+    #[case(
+        String::from("${timestamp}      ${requestreference}   ${somethingelse}"),
+        String::from(r"${timestamp}\s+${requestreference}\s+${somethingelse}")
+    )]
+    fn test_replace_whitespace_with_regex(#[case] mut pattern: String, #[case] expected: String) {
+        replace_whitespace_with_regex(&mut pattern);
+        assert_eq!(pattern, expected);
     }
 }

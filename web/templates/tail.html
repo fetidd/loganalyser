@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Live Tail — loganalyser{% endblock %}
+{% block content %}
+<h1>Live Tail</h1>
+<p class="subtitle">Real-time stream of incoming events via Server-Sent Events.</p>
+
+<div class="stub">⚙ Not yet implemented</div>
+
+<div class="placeholder">
+  <div class="ph-icon">▶</div>
+  <p>An optional filter input will narrow the live feed.<br>
+  Events arrive over SSE at <code>/tail/stream</code> and are prepended to the log list by HTMX.<br>
+  A pause button suspends the stream without dropping the connection.</p>
+</div>
+{% endblock %}

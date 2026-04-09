@@ -20,6 +20,8 @@ pub enum Event {
         data: HashMap<String, String>,
         parent_id: Option<Uuid>,
     },
+    // Json {},
+    // LogFmt {}
 }
 
 impl Event {
@@ -80,7 +82,6 @@ impl Event {
         }
         self
     }
-
 }
 
 #[cfg(test)]
@@ -103,14 +104,24 @@ mod tests {
 
     fn make_single(id: Uuid) -> Event {
         let mut e = Event::new_single("p", ts(), HashMap::new());
-        let Event::Single { id: ref mut eid, .. } = e else { unreachable!() };
+        let Event::Single {
+            id: ref mut eid, ..
+        } = e
+        else {
+            unreachable!()
+        };
         *eid = id;
         e
     }
 
     fn make_span(id: Uuid) -> Event {
         let mut e = Event::new_span("p", ts(), HashMap::new(), Duration::seconds(1));
-        let Event::Span { id: ref mut eid, .. } = e else { unreachable!() };
+        let Event::Span {
+            id: ref mut eid, ..
+        } = e
+        else {
+            unreachable!()
+        };
         *eid = id;
         e
     }

@@ -1,0 +1,30 @@
+<tr class="detail-row expanded">
+  <td colspan="4">
+    <div class="detail-content">
+
+      <div class="detail-meta">
+        <span class="detail-label">id</span>
+        <span class="detail-value">{{ id }}</span>
+        {% if parent_id %}
+        <span class="detail-label">parent_id</span>
+        <span class="detail-value">{{ parent_id }}</span>
+        {% endif %}
+      </div>
+
+      {% if fields %}
+      <div class="detail-fields">
+        {% for f in fields %}
+        <div class="detail-field">
+          <span class="detail-key">{{ f.key }}</span>
+          <span class="detail-val">{{ f.val }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <span class="detail-empty">no data fields</span>
+      {% endif %}
+
+
+    </div>
+  </td>
+</tr>

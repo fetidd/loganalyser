@@ -1,0 +1,56 @@
+{% macro event_rows(rows) %}
+  {% for row in rows %}
+  <tr class="event-row"
+      onclick="
+        const detail = this.nextElementSibling;
+        if (detail.classList.contains('expanded')) {
+          detail.classList.remove('expanded');
+          detail.innerHTML = '';
+        } else {
+          htmx.ajax('GET', '/events/{{ row.id }}/detail', {target: detail, swap: 'outerHTML'});
+        }
+      ">
+    <td><span class="badge badge-{{ row.kind }}">{{ row.kind }}</span></td>
+    <td>{{ row.name }}</td>
+    <td>{{ row.timestamp }}</td>
+    <td class="duration">
+      {% if row.duration_ms is not none %}{{ row.duration_ms }} ms{% else %}—{% endif %}
+    </td>
+  </tr>
+  <tr class="detail-row"></tr>
+  {% endfor %}
+{% endmacro %}
+
+<div class="table-scroll">
+  {% if rows | length == 0 %}
+    <div class="empty-state">no events matched</div>
+  {% else %}
+    <table class="events-table">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Name</th>
+          <th>Timestamp</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ event_rows(rows) }}
+        {% if has_more %}
+        <!--
+          Sentinel row: fires once when scrolled into view.
+          hx-trigger="intersect once" uses IntersectionObserver —
+          no polling, no scroll listeners. Replaces itself (outerHTML)
+          with the next block of rows plus a new sentinel.
+        -->
+        <tr class="load-sentinel"
+            hx-get="/events/results/more?page={{ next_page }}&name={{ name }}&kind={{ kind }}"
+            hx-trigger="intersect once"
+            hx-swap="outerHTML">
+          <td colspan="4" class="load-more">loading more…</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  {% endif %}
+</div>

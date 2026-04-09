@@ -68,8 +68,14 @@ pub async fn setup(config: &str) -> TestEnv {
     .await
     .unwrap();
     // Verify both tables are accessible before handing the env to the test.
-    storage.load(Filter::new()).await.expect("events table not ready");
-    storage.load_pending().await.expect("pending_spans table not ready");
+    storage
+        .load(Filter::new())
+        .await
+        .expect("events table not ready");
+    storage
+        .load_pending()
+        .await
+        .expect("pending_spans table not ready");
     TestEnv {
         _temp_dir: temp_dir,
         log_file_path,
@@ -119,23 +125,24 @@ timestamp_format = "%Y-%m-%d %H:%M:%S"
 
 [components]
 timestamp = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'
-ref = '(?P<ref>[A-Z]{3})'
-__ = '\s+'
+ref       = '[A-Z]{3}'
 
 [[parsers]]
-name = "single_event"
-glob = "LOG_PATH"
-type = "single"
-pattern = '${timestamp}${__}LOG${__}(?P<data>.*)'
+name    = "single_event"
+glob    = "LOG_PATH"
+type    = "single"
+pattern = '${timestamp} LOG (?P<data>.*)'
 
 [[parsers]]
-name = "span_event"
-glob = "LOG_PATH"
-type = "span"
-start_pattern = '${timestamp}${__}${ref}${__}START'
-end_pattern = '${timestamp}${__}${ref}${__}END'
+name             = "span_event"
+glob             = "LOG_PATH"
+type             = "span"
+start_pattern    = '${timestamp} ${ref}   START'
+end_pattern      = '${timestamp} ${ref}   END'
 reference_fields = ["ref"]
-nested = [
-    { name = "span_inner", type = "single", pattern = '${timestamp}${__}${ref}${__}NOTE${__}(?P<note>.*)' },
-]
+
+[[parsers.nested]]
+name    = "span_inner"
+type    = "single"
+pattern = '${timestamp} ${ref} NOTE (?P<note>.*)'
 "#;

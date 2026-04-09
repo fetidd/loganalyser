@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Span Waterfall — loganalyser{% endblock %}
+{% block content %}
+<h1>Span Waterfall</h1>
+<p class="subtitle">Child spans for a given parent event ID, rendered as a trace diagram.</p>
+
+<div class="stub">⚙ Not yet implemented</div>
+
+<div class="placeholder">
+  <div class="ph-icon">◈</div>
+  <p>Enter a parent event ID to load its span tree.<br>
+  Each span renders as a horizontal bar scaled to its duration, indented by depth.<br>
+  Hovering a bar shows the full data fields for that span.</p>
+</div>
+{% endblock %}

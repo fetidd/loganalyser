@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["log_parser", "file_watcher", "event_storage", "shared"]
+members = ["log_parser", "file_watcher", "event_storage", "shared", "web"]
 
 [profile.release]
 strip = true

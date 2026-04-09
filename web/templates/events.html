@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Log Viewer — loganalyser{% endblock %}
+{% block content %}
+
+<div class="events-layout">
+
+  <div class="events-header">
+    <div class="events-title-row">
+      <h1>Log Viewer</h1>
+      <span class="event-count">{{ total }} event{% if total != 1 %}s{% endif %} matched</span>
+    </div>
+
+    <form id="filter-form"
+          hx-get="/events/results"
+          hx-target="#results"
+          hx-push-url="true"
+          hx-trigger="submit,
+                      input changed delay:400ms from:[name='name'],
+                      change from:[name='kind']">
+      <div class="filter-bar">
+        <input
+          type="text"
+          name="name"
+          value="{{ name }}"
+          placeholder="filter by name…"
+          autocomplete="off"
+        />
+        <select name="kind">
+          <option value=""       {% if kind == "" %}selected{% endif %}>all types</option>
+          <option value="span"   {% if kind == "span" %}selected{% endif %}>spans</option>
+          <option value="single" {% if kind == "single" %}selected{% endif %}>singles</option>
+        </select>
+        <button type="submit">Filter</button>
+        <span class="htmx-indicator spinner">⟳</span>
+      </div>
+    </form>
+  </div>
+
+  <div id="results">
+    {% include "events_results.html" %}
+  </div>
+
+</div>
+
+<style>
+  main {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .events-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  .events-header { padding-bottom: 0.75rem; }
+
+  .events-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .event-count {
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  #results {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .table-scroll {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .filter-bar {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .filter-bar input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.75rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    outline: none;
+  }
+  .filter-bar input[type="text"]:focus { border-color: var(--accent); }
+
+  .filter-bar select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.75rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .filter-bar button {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    padding: 0.45rem 1rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .spinner {
+    display: none;
+    color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  .htmx-request .spinner { display: inline; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .events-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+
+  .events-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+    text-align: left;
+    padding: 0.55rem 0.75rem;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .events-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .events-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .badge-span   { background: rgba(168,255,62,0.12); color: var(--accent); }
+  .badge-single { background: rgba(107,112,148,0.2); color: var(--muted); }
+
+  .id-cell      { font-family: monospace; color: var(--muted); font-size: 0.78rem; }
+  .duration     { color: var(--accent); }
+  .data-preview { color: var(--muted); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .empty-state  { text-align: center; color: var(--muted); padding: 3rem; font-size: 0.85rem; }
+
+  .load-more { text-align: center; color: var(--muted); padding: 1rem; font-size: 0.8rem; }
+
+  .event-row { cursor: pointer; }
+  .event-row:hover td { background: rgba(168,255,62,0.04); }
+
+  .detail-row:not(.expanded) { display: none; }
+
+  .detail-row.expanded td {
+    padding: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .detail-content {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .detail-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 260px;
+  }
+
+  .detail-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.35rem; }
+  .detail-value { font-size: 0.8rem; color: var(--text); word-break: break-all; }
+
+  .detail-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    flex: 1;
+  }
+
+  .detail-field {
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  .detail-key { color: var(--accent); font-weight: 600; }
+  .detail-val { color: var(--text); }
+  .detail-empty { color: var(--muted); font-size: 0.8rem; }
+
+
+</style>
+{% endblock %}

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}loganalyser{% endblock %}</title>
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:              #0f1117;
+      --surface:         #1a1d27;
+      --border:          #2a2d3a;
+      --accent:          #a8ff3e;
+      --text:            #d4d8e8;
+      --muted:           #6b7094;
+      --danger:          #e05c6b;
+      --success:         #4ecb8d;
+      --nav-w:           220px;
+      --nav-w-collapsed: 48px;
+    }
+
+    body {
+      display: grid;
+      grid-template-columns: var(--nav-w) 1fr;
+      grid-template-rows: 100vh;
+      overflow: hidden;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 14px;
+      background: var(--bg);
+      color: var(--text);
+      transition: grid-template-columns 0.2s ease;
+    }
+
+    body.nav-collapsed {
+      grid-template-columns: var(--nav-w-collapsed) 1fr;
+    }
+
+    /* ── sidebar nav ── */
+    nav {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;        /* clips labels during the width transition */
+      padding: 1.5rem 0 0;
+    }
+
+    /* brand */
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0 1.25rem 1.5rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .nav-brand-icon { flex-shrink: 0; }
+
+    /* nav links */
+    nav ul { list-style: none; flex: 1; }
+
+    nav ul li a {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.6rem 1.25rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+
+    nav ul li a:hover,
+    nav ul li a.active {
+      color: var(--text);
+      background: rgba(168, 255, 62, 0.08);
+    }
+
+    nav ul li a.active { color: var(--accent); border-left: 2px solid var(--accent); }
+
+    .nav-icon  { font-size: 1rem; width: 1.2rem; text-align: center; flex-shrink: 0; }
+    .nav-label { transition: opacity 0.15s ease; }
+
+    /* toggle button — sits at the top of the nav */
+    .nav-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+      background: none;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      width: 100%;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-toggle:hover { color: var(--text); background: rgba(168, 255, 62, 0.08); }
+    .nav-toggle-icon { transition: transform 0.2s ease; }
+
+    /* ── collapsed state ── */
+    body.nav-collapsed .nav-label     { opacity: 0; width: 0; overflow: hidden; }
+    body.nav-collapsed .nav-brand span:last-child { opacity: 0; width: 0; overflow: hidden; }
+    body.nav-collapsed nav ul li a    { justify-content: center; padding: 0.6rem 0; }
+    body.nav-collapsed .nav-brand     { justify-content: center; padding-left: 0; padding-right: 0; }
+    body.nav-collapsed .nav-toggle-icon { transform: rotate(180deg); }
+
+    /* ── main content ── */
+    main {
+      padding: 2rem 2.5rem;
+      overflow-y: auto;
+    }
+
+    h1 { font-size: 1.4rem; font-weight: 600; color: var(--text); margin-bottom: 0.4rem; }
+    p.subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.9rem; }
+
+    /* ── cards ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      display: block;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(168, 255, 62, 0.2);
+    }
+
+    .card-icon { font-size: 1.5rem; margin-bottom: 0.75rem; }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--text); }
+    .card p  { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
+
+    /* ── stub notice ── */
+    .stub {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(168, 255, 62, 0.08);
+      border: 1px solid rgba(168, 255, 62, 0.25);
+      color: var(--accent);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      font-size: 0.82rem;
+      margin-bottom: 1.5rem;
+    }
+
+    /* ── placeholder box ── */
+    .placeholder {
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 3rem 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .placeholder .ph-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <script>
+    if (localStorage.getItem('nav-collapsed') === 'true') document.body.classList.add('nav-collapsed');
+  </script>
+
+  <nav>
+    <button class="nav-toggle"
+            title="Toggle sidebar"
+            onclick="
+              const collapsed = document.body.classList.toggle('nav-collapsed');
+              localStorage.setItem('nav-collapsed', collapsed);
+            ">
+      <span class="nav-toggle-icon">«</span>
+    </button>
+    <div class="nav-brand">
+      <span class="nav-brand-icon">◧</span>
+      <span class="nav-label">loganalyser</span>
+    </div>
+    <ul>
+      <li><a href="/"        title="Home"          class="{{ 'active' if page == 'home' }}"><span class="nav-icon">⌂</span><span class="nav-label"> Home</span></a></li>
+      <li><a href="/events"  title="Log Viewer"    class="{{ 'active' if page == 'events' }}"><span class="nav-icon">≡</span><span class="nav-label"> Log Viewer</span></a></li>
+      <li><a href="/tail"    title="Live Tail"     class="{{ 'active' if page == 'tail' }}"><span class="nav-icon">▶</span><span class="nav-label"> Live Tail</span></a></li>
+      <li><a href="/spans"   title="Span Waterfall" class="{{ 'active' if page == 'spans' }}"><span class="nav-icon">◈</span><span class="nav-label"> Span Waterfall</span></a></li>
+      <li><a href="/charts"  title="Charts"        class="{{ 'active' if page == 'charts' }}"><span class="nav-icon">◎</span><span class="nav-label"> Charts</span></a></li>
+      <li><a href="/searches" title="Saved Searches" class="{{ 'active' if page == 'searches' }}"><span class="nav-icon">✦</span><span class="nav-label"> Saved Searches</span></a></li>
+    </ul>
+  </nav>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

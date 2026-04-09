@@ -2,10 +2,9 @@ mod useful;
 
 use std::{sync::Arc, time::Duration};
 
+use crate::useful::*;
 use event_storage::{Filter, event_filter::Cmp};
 use shared::event::Event;
-use crate::useful::*;
-
 
 #[tokio::test]
 async fn basic_functionality() {
@@ -228,7 +227,6 @@ async fn pending_span_completes_when_end_written_after_restart() {
 /// reads the END line, leaving the span permanently incomplete.
 ///
 /// This test documents the desired behaviour (span should complete).
-/// It currently FAILS, confirming the bug.
 #[tokio::test]
 async fn pending_span_completes_when_end_written_during_downtime() {
     let mut env = setup(BASIC_CONFIG).await;
