@@ -10,22 +10,22 @@ connection_string = "/home/ben/loganalyser/events.db"
 timestamp_format = "%Y-%m-%d %H:%M:%S"
 
 [components]
-timestamp = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})' # TODO reduce the required regex formatting here, but allow it for fine-tuning, so this line is correct
-requestreference = 'W\d+-\d+-[^\s]+'# but so is this one, this is effectively (?P<requestreference>W\d+-\d+-[^\s]+)
+timestamp = '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+requestreference = 'W\d+-\d+-[^\s]+'
 
 [[parsers]]
 name = "log1"
 glob = "/home/ben/loganalyser/*.log"
 type = "single"
-pattern = '${timestamp}${__}(?P<data>.*)'
+pattern = '(?P<timestamp>${timestamp}) (?P<data>.*)'
 
 [[parsers]]
 name = "log2"
 glob = "/home/ben/loganalyser/*.log"
 type = "span"
-start_pattern = '${timestamp}${__}${requestreference}${__}START'
-end_pattern = '${timestamp} ${requestreference} END' # TODO spaces like this are equivalent to above
+start_pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) START'
+end_pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) END'
 reference_fields = ["requestreference"]
 nested = [
-    { name = "innerlog1", type = "single", pattern = '${timestamp}${__}${requestreference}${__}SOMETHING HAPPENED' },
+    { name = "innerlog1", type = "single", pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) SOMETHING HAPPENED' },
 ]

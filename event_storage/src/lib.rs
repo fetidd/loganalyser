@@ -43,8 +43,11 @@ pub trait EventStorage: Send + Sync + std::fmt::Debug {
         _file_path: &str,
         _parser_name: &str,
         _records: &[PendingSpanRecord],
-        _cursor: u64,
     ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn save_cursor(&self, _file_path: &str, _cursor: u64) -> Result<()> {
         Ok(())
     }
 

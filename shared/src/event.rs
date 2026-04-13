@@ -20,8 +20,6 @@ pub enum Event {
         data: HashMap<String, String>,
         parent_id: Option<Uuid>,
     },
-    // Json {},
-    // LogFmt {}
 }
 
 impl Event {
@@ -71,6 +69,12 @@ impl Event {
     pub fn parent_id(&self) -> Option<Uuid> {
         match self {
             Event::Span { parent_id, .. } | Event::Single { parent_id, .. } => *parent_id,
+        }
+    }
+
+    pub fn data(&self) -> &HashMap<String, String> {
+        match self {
+            Event::Span { data, .. } | Event::Single { data, .. } => data,
         }
     }
 

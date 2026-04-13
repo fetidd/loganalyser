@@ -124,25 +124,25 @@ connection_string = "DB_PATH"
 timestamp_format = "%Y-%m-%d %H:%M:%S"
 
 [components]
-timestamp = '(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})'
+timestamp = '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
 ref       = '[A-Z]{3}'
 
 [[parsers]]
 name    = "single_event"
 glob    = "LOG_PATH"
 type    = "single"
-pattern = '${timestamp} LOG (?P<data>.*)'
+pattern = '(?P<timestamp>${timestamp}) LOG (?P<data>.*)'
 
 [[parsers]]
 name             = "span_event"
 glob             = "LOG_PATH"
 type             = "span"
-start_pattern    = '${timestamp} ${ref}   START'
-end_pattern      = '${timestamp} ${ref}   END'
+start_pattern    = '(?P<timestamp>${timestamp}) (?P<ref>${ref})   START'
+end_pattern      = '(?P<timestamp>${timestamp}) (?P<ref>${ref})   END'
 reference_fields = ["ref"]
 
 [[parsers.nested]]
 name    = "span_inner"
 type    = "single"
-pattern = '${timestamp} ${ref} NOTE (?P<note>.*)'
+pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) NOTE (?P<note>.*)'
 "#;

@@ -49,12 +49,7 @@ impl InternalSpanParser {
         )
     }
 
-    pub(super) fn parse_line_with_context(
-        &mut self,
-        line: &str,
-        parent_lookup: Option<&dyn Fn(&HashMap<String, String>) -> Option<Uuid>>,
-    ) -> Vec<Event> {
-        let mut events = vec![];
+    pub(super) fn parse_line_with_context(&mut self, line: &str) -> Option<Event> {
         if let Some(start_captures) = self.start_pattern.captures(line) {
             let Some(timestamp) =
                 super::extract_timestamp(&start_captures["timestamp"], &self.timestamp_format)
@@ -64,21 +59,19 @@ impl InternalSpanParser {
                     format = self.timestamp_format,
                     "failed to parse start timestamp"
                 );
-                return events;
+                return None;
             };
             let mut capture_names = self.start_pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &start_captures);
             let span_reference = self.extract_span_reference(&data);
-            let parent_id = if let Some(parent_lookup) = parent_lookup {
-                match parent_lookup(&data) {
-                    Some(id) => Some(id),
-                    None => return events, // nested but no matching parent → suppress
-                }
+            let pending_span = PendingSpan::new(timestamp, data, None);
+            if self.pending.0.contains_key(&span_reference) {
+                tracing::warn!("pending span {span_reference:?} found multiple times! {line}");
             } else {
-                None
-            };
-            let pending_span = PendingSpan::new(timestamp, data, parent_id);
-            self.pending.0.insert(span_reference, pending_span);
+                self.pending.0.insert(span_reference, pending_span);
+                self.pending.1 = true;
+            }
+            None
         } else if let Some(end_captures) = self.end_pattern.captures(line) {
             let mut capture_names = self.end_pattern.capture_names();
             let mut data = super::extract_data(&mut capture_names, &end_captures);
@@ -94,11 +87,12 @@ impl InternalSpanParser {
                         format = self.timestamp_format,
                         "failed to parse end timestamp"
                     );
-                    return events;
+                    return None;
                 };
                 data.extend(pending_span.data);
                 let duration = end_timestamp - pending_span.timestamp;
-                events.push(Event::Span {
+                self.pending.1 = true;
+                Some(Event::Span {
                     id: pending_span.id,
                     name: self.name.clone(),
                     timestamp: pending_span.timestamp,
@@ -106,35 +100,41 @@ impl InternalSpanParser {
                     duration,
                     parent_id: pending_span.parent_id,
                 })
+            } else {
+                None
             }
-        } else if !self.nested.is_empty() {
-            let pending = &self.pending;
-            let reference_fields = &self.reference_fields;
-            let lookup = |data: &HashMap<String, String>| {
-                pending.0.iter().find_map(|(span_ref, pending_span)| {
-                    let matches = reference_fields
-                        .iter()
-                        .zip(span_ref.0.iter())
-                        .all(|(field, value)| data.get(field) == Some(value));
-                    matches.then_some(pending_span.id)
-                })
-            };
+        } else {
             for parser in self.nested.iter_mut() {
-                events.extend(parser.parse_line_with_context(line, Some(&lookup)));
+                if let Some(event) = parser.parse_line_with_context(line) {
+                    let parent_id = self.pending.0.iter().find_map(|(span_ref, pending_span)| {
+                        let matches = self
+                            .reference_fields
+                            .iter()
+                            .zip(span_ref.0.iter())
+                            .all(|(field, value)| event.data().get(field) == Some(value));
+                        matches.then_some(pending_span.id)
+                    });
+                    return if let Some(pid) = parent_id {
+                        Some(event.with_parent(pid))
+                    } else {
+                        None // no matching parent span → suppress
+                    };
+                }
             }
+            None
         }
-        events
-    }
-
-    pub(super) fn parse(&mut self, input: &str) -> Vec<Event> {
-        input
-            .lines()
-            .flat_map(|line| self.parse_line_with_context(line, None))
-            .collect()
     }
 
     pub fn has_pending(&self) -> bool {
         !self.pending.0.is_empty()
+    }
+
+    pub fn clean(&mut self) {
+        self.pending.1 = false;
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.pending.1
     }
 
     pub fn pending_spans(
@@ -173,12 +173,23 @@ impl InternalSpanParser {
 
     pub fn restore_pending(
         &mut self,
-        spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>)>,
+        spans: Vec<(
+            Vec<String>,
+            Uuid,
+            NaiveDateTime,
+            HashMap<String, String>,
+            Option<Uuid>,
+        )>,
     ) {
         for (span_ref_parts, id, timestamp, data, parent_id) in spans {
             self.pending.0.insert(
                 SpanReference(span_ref_parts),
-                PendingSpan { id, timestamp, data, parent_id },
+                PendingSpan {
+                    id,
+                    timestamp,
+                    data,
+                    parent_id,
+                },
             );
         }
     }
@@ -211,7 +222,7 @@ impl PendingSpan {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PendingSpans(HashMap<SpanReference, PendingSpan>);
+pub(crate) struct PendingSpans(HashMap<SpanReference, PendingSpan>, bool);
 
 #[cfg(test)]
 mod tests {
@@ -319,7 +330,10 @@ mod tests {
             })],
             vec!["ref".into()],
         );
-        let mut actual = parser.parse(log);
+        let mut actual: Vec<Event> = log
+            .lines()
+            .filter_map(|line| parser.parse_line_with_context(line))
+            .collect();
         actual.iter_mut().for_each(|f| set_id(f, TEST_ID));
         assert_eq!(actual, expected);
     }
@@ -345,14 +359,17 @@ mod tests {
             })],
             vec!["ref".into()],
         );
-        let events = parser.parse(log);
+        let events: Vec<Event> = log
+            .lines()
+            .filter_map(|line| parser.parse_line_with_context(line))
+            .collect();
         // abc02 nested has no matching parent span so is suppressed — only 2 events emitted
         assert_eq!(events.len(), 2);
         // outer span is emitted last (when END is seen)
         let outer_id = events[1].id();
         // abc01 nested: parent_id links to the outer span
         assert!(
-            matches!(&events[0], Event::Single { name, parent_id, .. } if name == "test_inner" && *parent_id == Some(outer_id))
+            matches!(&events[0], Event::Single { name, parent_id, .. } if name == "test_inner" && parent_id == &Some(outer_id))
         );
         // outer span: top-level, no parent
         assert!(

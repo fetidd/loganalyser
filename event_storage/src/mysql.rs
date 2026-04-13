@@ -111,11 +111,14 @@ impl EventStorage for MySqlEventStore {
         file_path: &str,
         parser_name: &str,
         records: &[PendingSpanRecord],
-        cursor: u64,
     ) -> Result<()> {
         self.sidecar
-            .save_pending(file_path, parser_name, records, cursor)
+            .save_pending(file_path, parser_name, records)
             .await
+    }
+
+    async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
+        self.sidecar.save_cursor(file_path, cursor).await
     }
 
     async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {

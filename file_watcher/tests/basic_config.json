@@ -18,20 +18,20 @@
       "name": "single_event",
       "glob": "/var/log/app/*.log",
       "type": "single",
-      "pattern": "${timestamp} LOG (?P<data>.*)"
+      "pattern": "(?P<timestamp>${timestamp}) LOG (?P<data>.*)"
     },
     {
       "name": "span_event",
       "glob": "/var/log/app/*.log",
       "type": "span",
-      "start_pattern": "${timestamp} ${ref}   START",
-      "end_pattern": "${timestamp} ${ref}   END",
+      "start_pattern": "(?P<timestamp>${timestamp}) (?P<ref>${ref})   START",
+      "end_pattern": "(?P<timestamp>${timestamp}) (?P<ref>${ref})   END",
       "reference_fields": ["ref"],
       "nested": [
         {
           "name": "span_inner",
           "type": "single",
-          "pattern": "${timestamp} ${ref} NOTE (?P<note>.*)"
+          "pattern": "(?P<timestamp>${timestamp}) (?P<ref>${ref}) NOTE (?P<note>.*)"
         }
       ]
     }

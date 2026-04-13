@@ -2,10 +2,9 @@ mod build;
 mod single;
 mod span;
 
-use std::collections::HashMap;
-
 use chrono::NaiveDateTime;
 use regex::{CaptureNames, Captures};
+use std::collections::HashMap;
 
 pub use single::InternalSingleParser;
 pub use span::InternalSpanParser;
@@ -34,24 +33,14 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self, input: &str) -> Vec<Event> {
-        match self {
-            Parser::Single(p) => p.parse(input),
-            Parser::Span(p) => p.parse(input),
-        }
+    pub fn parse(&mut self, input: &str) -> Option<Event> {
+        self.parse_line_with_context(input)
     }
 
-    fn parse_line_with_context(
-        &mut self,
-        line: &str,
-        lookup: Option<&dyn Fn(&HashMap<String, String>) -> Option<Uuid>>,
-    ) -> Vec<Event> {
+    fn parse_line_with_context(&mut self, line: &str) -> Option<Event> {
         match self {
-            Parser::Single(internal) => internal
-                .parse_line_with_context(line, lookup)
-                .into_iter()
-                .collect(),
-            Parser::Span(internal) => internal.parse_line_with_context(line, lookup),
+            Parser::Single(internal) => internal.parse_line_with_context(line),
+            Parser::Span(internal) => internal.parse_line_with_context(line),
         }
     }
 
@@ -70,9 +59,28 @@ impl Parser {
         }
     }
 
+    pub fn is_dirty(&self) -> bool {
+        match self {
+            Parser::Single(_internal_single_parser) => false,
+            Parser::Span(internal_span_parser) => internal_span_parser.is_dirty(),
+        }
+    }
+
+    pub fn clean(&mut self) {
+        if let Parser::Span(p) = self {
+            p.clean();
+        }
+    }
+
     pub fn restore_pending(
         &mut self,
-        spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>)>,
+        spans: Vec<(
+            Vec<String>,
+            Uuid,
+            NaiveDateTime,
+            HashMap<String, String>,
+            Option<Uuid>,
+        )>,
     ) {
         if let Parser::Span(p) = self {
             p.restore_pending(spans);

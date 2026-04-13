@@ -990,6 +990,7 @@ name = "log_parser"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "glob",
  "regex",
  "rstest",
  "serde",

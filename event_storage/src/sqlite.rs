@@ -177,7 +177,6 @@ impl EventStorage for SqliteEventStore {
         file_path: &str,
         parser_name: &str,
         records: &[PendingSpanRecord],
-        cursor: u64,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM pending_spans WHERE file_path = ? AND parser_name = ?")
@@ -201,24 +200,19 @@ impl EventStorage for SqliteEventStore {
             .execute(&mut *tx)
             .await?;
         }
-        // Upsert cursor. If no pending spans remain, remove the cursor entry so
-        // the next startup does not try to rewind a file that is fully caught up.
-        if records.is_empty() {
-            sqlx::query("DELETE FROM file_cursors WHERE file_path = ?")
-                .bind(file_path)
-                .execute(&mut *tx)
-                .await?;
-        } else {
-            sqlx::query(
-                "INSERT INTO file_cursors (file_path, cursor) VALUES (?, ?) \
-                 ON CONFLICT(file_path) DO UPDATE SET cursor = excluded.cursor",
-            )
-            .bind(file_path)
-            .bind(cursor as i64)
-            .execute(&mut *tx)
-            .await?;
-        }
         tx.commit().await?;
+        Ok(())
+    }
+
+    async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO file_cursors (file_path, cursor) VALUES (?, ?) \
+             ON CONFLICT(file_path) DO UPDATE SET cursor = excluded.cursor",
+        )
+        .bind(file_path)
+        .bind(cursor as i64)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
