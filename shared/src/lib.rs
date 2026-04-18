@@ -2,6 +2,7 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime, ParseError};
 
 pub mod env;
 pub mod event;
+pub mod event_filter;
 pub mod tree;
 
 /// Retries an async expression with exponential backoff.

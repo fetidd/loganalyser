@@ -21,6 +21,7 @@ COPY shared/ shared/
 COPY log_parser/ log_parser/
 COPY event_storage/ event_storage/
 COPY file_watcher/ file_watcher/
+COPY web/ web/
 
 RUN cargo build --release -p file_watcher
 
