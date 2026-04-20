@@ -74,6 +74,7 @@ mod tests {
             "single1",
             shared::datetime_from("2026-01-01").unwrap(),
             HashMap::new(),
+            None,
         );
         let store = MemoryEventStore::new_in_memory().await;
         store

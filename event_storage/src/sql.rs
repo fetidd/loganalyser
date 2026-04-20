@@ -52,12 +52,21 @@ pub(crate) struct EventForInsert {
     pub duration_ms: Option<i64>,
     pub parent_id: Option<String>,
     pub data_json: String,
+    pub raw_line: Option<String>,
 }
 
 impl EventForInsert {
     pub(crate) fn from_event(event: &Event) -> crate::Result<Self> {
         match event {
-            Event::Span { id, name, timestamp, data, duration, parent_id } => Ok(Self {
+            Event::Span {
+                id,
+                name,
+                timestamp,
+                data,
+                duration,
+                parent_id,
+                raw_lines,
+            } => Ok(Self {
                 id: id.to_string(),
                 event_type: "span",
                 name: name.clone(),
@@ -65,8 +74,16 @@ impl EventForInsert {
                 duration_ms: Some(duration.num_milliseconds()),
                 parent_id: parent_id.map(|p| p.to_string()),
                 data_json: serde_json::to_string(data)?,
+                raw_line: raw_lines.as_ref().map(|(s1, s2)| format!("{s1}\n{s2}")),
             }),
-            Event::Single { id, name, timestamp, data, parent_id } => Ok(Self {
+            Event::Single {
+                id,
+                name,
+                timestamp,
+                data,
+                parent_id,
+                raw_line,
+            } => Ok(Self {
                 id: id.to_string(),
                 event_type: "single",
                 name: name.clone(),
@@ -74,13 +91,14 @@ impl EventForInsert {
                 duration_ms: None,
                 parent_id: parent_id.map(|p| p.to_string()),
                 data_json: serde_json::to_string(data)?,
+                raw_line: raw_line.clone(),
             }),
         }
     }
 
     pub(crate) fn insert_sql() -> &'static str {
-        "INSERT INTO events (id, event_type, name, timestamp, duration_ms, parent_id, data) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO events (id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     }
 }
 
@@ -92,6 +110,7 @@ pub(crate) fn build_event(
     data_json: String,
     parent_id: Option<Uuid>,
     duration_ms: Option<i64>,
+    raw_line: Option<String>,
 ) -> crate::Result<Event> {
     let data: HashMap<String, String> = serde_json::from_str(&data_json)?;
     match event_type.as_str() {
@@ -102,9 +121,27 @@ pub(crate) fn build_event(
             data,
             duration: Duration::milliseconds(duration_ms.unwrap_or(0)),
             parent_id,
+            raw_lines: raw_line.map(|mut s| {
+                let mut raw_lines = (String::new(), String::new());
+                if let Some(split_i) = s.find('\n') {
+                    raw_lines.1 = s.split_off(split_i + 1);
+                    s.pop(); // remove the '\n'
+                    raw_lines.0 = s;
+                }
+                raw_lines
+            }),
         }),
-        "single" => Ok(Event::Single { id, name, timestamp, data, parent_id }),
-        other => Err(crate::Error::Storage(format!("unknown event_type: {other}"))),
+        "single" => Ok(Event::Single {
+            id,
+            name,
+            timestamp,
+            data,
+            parent_id,
+            raw_line,
+        }),
+        other => Err(crate::Error::Storage(format!(
+            "unknown event_type: {other}"
+        ))),
     }
 }
 
@@ -188,12 +225,7 @@ fn build_string_column(
     }
 }
 
-fn build_i64_column(
-    column: &str,
-    cmp: &Cmp<i64>,
-    params: &mut Params,
-    dialect: &mut impl Dialect,
-) {
+fn build_i64_column(column: &str, cmp: &Cmp<i64>, params: &mut Params, dialect: &mut impl Dialect) {
     match cmp {
         Cmp::In(vals) => {
             let placeholders = vals
@@ -201,7 +233,8 @@ fn build_i64_column(
                 .map(|_| dialect.placeholder())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let binds: Vec<ParamValue> = vals.iter().map(|v| ParamValue::SignedNumber(*v)).collect();
+            let binds: Vec<ParamValue> =
+                vals.iter().map(|v| ParamValue::SignedNumber(*v)).collect();
             params.add(&format!("{column} IN ({placeholders})"), &binds);
         }
         other => {
@@ -214,7 +247,10 @@ fn build_i64_column(
                 _ => panic!("{column} can not be filtered by {other:?}"),
             };
             let ph = dialect.placeholder();
-            params.add(&format!("{column} {op} {ph}"), &[ParamValue::SignedNumber(*val)]);
+            params.add(
+                &format!("{column} {op} {ph}"),
+                &[ParamValue::SignedNumber(*val)],
+            );
         }
     }
 }

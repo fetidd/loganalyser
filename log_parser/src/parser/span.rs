@@ -18,6 +18,7 @@ pub struct InternalSpanParser {
     pub nested: Vec<Parser>,
     pub reference_fields: Vec<String>,
     pub(super) pending: PendingSpans,
+    pub include_raw: bool,
 }
 
 impl InternalSpanParser {
@@ -28,6 +29,7 @@ impl InternalSpanParser {
         end_pattern: Regex,
         nested: Vec<Parser>,
         reference_fields: Vec<String>,
+        include_raw: bool,
     ) -> Self {
         Self {
             name,
@@ -37,6 +39,7 @@ impl InternalSpanParser {
             nested,
             reference_fields,
             pending: PendingSpans::default(),
+            include_raw,
         }
     }
 
@@ -64,21 +67,23 @@ impl InternalSpanParser {
             let mut capture_names = self.start_pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &start_captures);
             let span_reference = self.extract_span_reference(&data);
-            let pending_span = PendingSpan::new(timestamp, data, None);
-            if self.pending.0.contains_key(&span_reference) {
+            let pending_span = PendingSpan::new(
+                timestamp,
+                data,
+                None,
+                self.include_raw.then(|| line.to_string()),
+            );
+            if self.pending.contains(&span_reference) {
                 tracing::warn!("pending span {span_reference:?} found multiple times! {line}");
             } else {
-                self.pending.0.insert(span_reference, pending_span);
-                self.pending.1 = true;
+                self.pending.add(span_reference, pending_span);
             }
             None
         } else if let Some(end_captures) = self.end_pattern.captures(line) {
             let mut capture_names = self.end_pattern.capture_names();
             let mut data = super::extract_data(&mut capture_names, &end_captures);
             let span_reference = self.extract_span_reference(&data);
-            if let Some((_pending_reference, pending_span)) =
-                self.pending.0.remove_entry(&span_reference)
-            {
+            if let Some((_pending_reference, pending_span)) = self.pending.remove(&span_reference) {
                 let Some(end_timestamp) =
                     super::extract_timestamp(&end_captures["timestamp"], &self.timestamp_format)
                 else {
@@ -91,7 +96,6 @@ impl InternalSpanParser {
                 };
                 data.extend(pending_span.data);
                 let duration = end_timestamp - pending_span.timestamp;
-                self.pending.1 = true;
                 Some(Event::Span {
                     id: pending_span.id,
                     name: self.name.clone(),
@@ -99,6 +103,14 @@ impl InternalSpanParser {
                     data,
                     duration,
                     parent_id: pending_span.parent_id,
+                    raw_lines: self.include_raw.then(|| {
+                        (
+                            pending_span
+                                .raw_line
+                                .expect("pending span missing raw_line"),
+                            line.to_string(),
+                        )
+                    }),
                 })
             } else {
                 None
@@ -106,14 +118,17 @@ impl InternalSpanParser {
         } else {
             for parser in self.nested.iter_mut() {
                 if let Some(event) = parser.parse_line_with_context(line) {
-                    let parent_id = self.pending.0.iter().find_map(|(span_ref, pending_span)| {
-                        let matches = self
-                            .reference_fields
+                    let parent_id =
+                        self.pending
+                            .spans
                             .iter()
-                            .zip(span_ref.0.iter())
-                            .all(|(field, value)| event.data().get(field) == Some(value));
-                        matches.then_some(pending_span.id)
-                    });
+                            .find_map(|(span_ref, pending_span)| {
+                                let matches =
+                                    self.reference_fields.iter().zip(span_ref.0.iter()).all(
+                                        |(field, value)| event.data().get(field) == Some(value),
+                                    );
+                                matches.then_some(pending_span.id)
+                            });
                     return if let Some(pid) = parent_id {
                         Some(event.with_parent(pid))
                     } else {
@@ -126,15 +141,15 @@ impl InternalSpanParser {
     }
 
     pub fn has_pending(&self) -> bool {
-        !self.pending.0.is_empty()
+        !self.pending.spans.is_empty()
     }
 
     pub fn clean(&mut self) {
-        self.pending.1 = false;
+        self.pending.dirty = false;
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.pending.1
+        self.pending.dirty
     }
 
     pub fn pending_spans(
@@ -145,9 +160,10 @@ impl InternalSpanParser {
         NaiveDateTime,
         HashMap<String, String>,
         Option<Uuid>,
+        Option<String>,
     )> {
         self.pending
-            .0
+            .spans
             .iter()
             .map(
                 |(
@@ -157,6 +173,7 @@ impl InternalSpanParser {
                         timestamp,
                         data,
                         parent_id,
+                        raw_line,
                     },
                 )| {
                     (
@@ -165,6 +182,7 @@ impl InternalSpanParser {
                         *timestamp,
                         data.clone(),
                         *parent_id,
+                        raw_line.clone(), // TODO can this use refs?
                     )
                 },
             )
@@ -179,16 +197,18 @@ impl InternalSpanParser {
             NaiveDateTime,
             HashMap<String, String>,
             Option<Uuid>,
+            Option<String>,
         )>,
     ) {
-        for (span_ref_parts, id, timestamp, data, parent_id) in spans {
-            self.pending.0.insert(
+        for (span_ref_parts, id, timestamp, data, parent_id, raw_line) in spans {
+            self.pending.spans.insert(
                 SpanReference(span_ref_parts),
                 PendingSpan {
                     id,
                     timestamp,
                     data,
                     parent_id,
+                    raw_line,
                 },
             );
         }
@@ -204,6 +224,7 @@ pub(crate) struct PendingSpan {
     timestamp: NaiveDateTime,
     data: HashMap<String, String>,
     parent_id: Option<Uuid>,
+    raw_line: Option<String>,
 }
 
 impl PendingSpan {
@@ -211,18 +232,42 @@ impl PendingSpan {
         timestamp: NaiveDateTime,
         data: HashMap<String, String>,
         parent_id: Option<Uuid>,
+        raw_line: Option<String>,
     ) -> Self {
         Self {
             timestamp,
             data,
             id: Uuid::new_v4(),
             parent_id,
+            raw_line,
         }
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PendingSpans(HashMap<SpanReference, PendingSpan>, bool);
+pub(crate) struct PendingSpans {
+    spans: HashMap<SpanReference, PendingSpan>,
+    dirty: bool,
+}
+
+impl PendingSpans {
+    fn add(&mut self, span_reference: SpanReference, pending_span: PendingSpan) {
+        self.spans.insert(span_reference, pending_span);
+        self.dirty = true;
+    }
+
+    fn remove(&mut self, span_reference: &SpanReference) -> Option<(SpanReference, PendingSpan)> {
+        let span = self.spans.remove_entry(span_reference);
+        if span.is_some() {
+            self.dirty = true;
+        }
+        span
+    }
+
+    fn contains(&self, span_reference: &SpanReference) -> bool {
+        self.spans.contains_key(span_reference)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -256,6 +301,7 @@ mod tests {
             NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data_map,
             Duration::new(duration, 0).unwrap(),
+            None,
         );
         set_id(&mut e, TEST_ID);
         e
@@ -327,8 +373,10 @@ mod tests {
                 )
                 .unwrap(),
                 timestamp_format: TS_FMT.to_string(),
+                include_raw: false,
             })],
             vec!["ref".into()],
+            false
         );
         let mut actual: Vec<Event> = log
             .lines()
@@ -356,8 +404,10 @@ mod tests {
                 )
                 .unwrap(),
                 timestamp_format: TS_FMT.to_string(),
+                include_raw: false,
             })],
             vec!["ref".into()],
+false
         );
         let events: Vec<Event> = log
             .lines()

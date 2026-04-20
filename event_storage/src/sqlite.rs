@@ -21,6 +21,7 @@ use crate::{EventStorage, Filter, Result};
 ///     timestamp   TEXT    NOT NULL,
 ///     duration_ms INTEGER     NULL,
 ///     parent_id   TEXT        NULL,
+///     raw_line    TEXT,
 ///     data        TEXT    NOT NULL
 /// );
 /// CREATE TABLE pending_spans (
@@ -31,6 +32,7 @@ use crate::{EventStorage, Filter, Result};
 ///     timestamp   TEXT NOT NULL,
 ///     data        TEXT NOT NULL,
 ///     parent_id   TEXT,
+///     raw_line    TEXT,
 ///     PRIMARY KEY (file_path, parser_name, span_ref)
 /// );
 /// ```
@@ -49,7 +51,8 @@ impl SqliteEventStore {
                 timestamp TEXT NOT NULL, \
                 duration_ms INTEGER NULL, \
                 parent_id TEXT NULL, \
-                data TEXT NOT NULL\
+                data TEXT NOT NULL,\
+                raw_line TEXT NULL \
             );",
         )
         .execute(&pool)
@@ -65,6 +68,7 @@ impl SqliteEventStore {
                 timestamp   TEXT NOT NULL,\
                 data        TEXT NOT NULL,\
                 parent_id   TEXT,\
+                raw_line    TEXT,\
                 PRIMARY KEY (file_path, parser_name, span_ref)\
             );",
         )
@@ -121,6 +125,7 @@ impl EventStorage for SqliteEventStore {
                 .bind(e.duration_ms)
                 .bind(e.parent_id)
                 .bind(e.data_json)
+                .bind(e.raw_line)
                 .execute(&mut *tx)
                 .await?;
         }
@@ -131,7 +136,7 @@ impl EventStorage for SqliteEventStore {
     async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!(
-            "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data FROM events{where_sql}",
+            "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",
         );
         let mut query = sqlx::query(&query);
         for b in bindings {
@@ -159,6 +164,7 @@ impl EventStorage for SqliteEventStore {
                 .map(|s| Uuid::parse_str(&s))
                 .transpose()?;
             let duration_ms: Option<i64> = row.try_get("duration_ms")?;
+            let raw_line: Option<String> = row.try_get("raw_line")?;
             events.push(build_event(
                 id,
                 event_type,
@@ -167,6 +173,7 @@ impl EventStorage for SqliteEventStore {
                 data_json,
                 parent_id,
                 duration_ms,
+                raw_line,
             )?);
         }
         Ok(events)
@@ -187,8 +194,8 @@ impl EventStorage for SqliteEventStore {
         for r in records {
             sqlx::query(
                 "INSERT INTO pending_spans \
-                    (file_path, parser_name, span_ref, id, timestamp, data, parent_id) \
-                    VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (file_path, parser_name, span_ref, id, timestamp, data, parent_id, raw_line) \
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&r.file_path)
             .bind(&r.parser_name)
@@ -197,6 +204,7 @@ impl EventStorage for SqliteEventStore {
             .bind(r.timestamp.format("%Y-%m-%d %H:%M:%S%.f").to_string())
             .bind(serde_json::to_string(&r.data)?)
             .bind(r.parent_id.map(|u| u.to_string()))
+            .bind(r.raw_line.clone())
             .execute(&mut *tx)
             .await?;
         }
@@ -231,8 +239,7 @@ impl EventStorage for SqliteEventStore {
 
     async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
         let rows = sqlx::query(
-            "SELECT file_path, parser_name, span_ref, id, timestamp, data, parent_id \
-             FROM pending_spans",
+            "SELECT file_path, parser_name, span_ref, id, timestamp, data, parent_id, raw_line FROM pending_spans",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -257,6 +264,7 @@ impl EventStorage for SqliteEventStore {
                 .map(|s| Uuid::parse_str(&s))
                 .transpose()
                 .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+            let raw_line = row.try_get::<Option<String>, _>("raw_line")?;
             records.push(PendingSpanRecord {
                 file_path,
                 parser_name,
@@ -265,6 +273,7 @@ impl EventStorage for SqliteEventStore {
                 timestamp,
                 data,
                 parent_id,
+                raw_line,
             });
         }
         Ok(records)

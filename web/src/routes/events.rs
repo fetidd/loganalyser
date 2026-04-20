@@ -7,7 +7,10 @@ use minijinja::context;
 use serde::{Deserialize, Serialize};
 use shared::event::Event;
 
-use crate::{AppState, routes::{AppError, HtmlResult}};
+use crate::{
+    AppState,
+    routes::{AppError, HtmlResult},
+};
 
 const PAGE_SIZE: usize = 50;
 
@@ -30,14 +33,25 @@ struct EventRow {
 impl EventRow {
     fn from_event(e: &Event) -> Self {
         match e {
-            Event::Span { id, name, timestamp, duration, .. } => EventRow {
+            Event::Span {
+                id,
+                name,
+                timestamp,
+                duration,
+                ..
+            } => EventRow {
                 id: id.to_string(),
                 kind: "span",
                 name: name.clone(),
                 timestamp: timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
                 duration_ms: Some(duration.num_milliseconds()),
             },
-            Event::Single { id, name, timestamp, .. } => EventRow {
+            Event::Single {
+                id,
+                name,
+                timestamp,
+                ..
+            } => EventRow {
                 id: id.to_string(),
                 kind: "single",
                 name: name.clone(),
@@ -78,9 +92,9 @@ async fn load_page(
 
     if let Some(kind) = &query.kind {
         events.retain(|e| match kind.as_str() {
-            "span"   => matches!(e, Event::Span { .. }),
+            "span" => matches!(e, Event::Span { .. }),
             "single" => matches!(e, Event::Single { .. }),
-            _        => true,
+            _ => true,
         });
     }
 
@@ -93,7 +107,12 @@ async fn load_page(
 
     let offset = (page - 1) * PAGE_SIZE;
     let has_more = offset + PAGE_SIZE < events.len();
-    let rows = events.iter().skip(offset).take(PAGE_SIZE).map(EventRow::from_event).collect();
+    let rows = events
+        .iter()
+        .skip(offset)
+        .take(PAGE_SIZE)
+        .map(EventRow::from_event)
+        .collect();
     Ok((rows, has_more))
 }
 
@@ -133,10 +152,7 @@ pub async fn results(
 }
 
 // GET /events/results/more — subsequent pages; sentinel swaps itself with these rows
-pub async fn more(
-    State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
-) -> HtmlResult {
+pub async fn more(State(state): State<AppState>, Query(query): Query<EventsQuery>) -> HtmlResult {
     let page = query.page.unwrap_or(2).max(2);
     let (rows, has_more) = load_page(&state, &query, page).await?;
     let tmpl = state.env.get_template("events_more.html")?;
@@ -151,10 +167,7 @@ pub async fn more(
 }
 
 // GET /events/{id}/detail
-pub async fn detail(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> HtmlResult {
+pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> HtmlResult {
     let filter = Filter::new().with_id(Cmp::Eq(id));
     let events = state.store.load(filter).await.map_err(storage_err)?;
 
@@ -162,19 +175,45 @@ pub async fn detail(
         return Ok(Html(r#"<tr class="detail-row"></tr>"#.into()));
     };
 
-    let (eid, parent_id, mut fields) = match &event {
-        Event::Span   { id, parent_id, data, .. } |
-        Event::Single { id, parent_id, data, .. } => (
+    let (eid, parent_id, mut fields, raw_line) = match &event {
+        Event::Span {
+            id,
+            parent_id,
+            data,
+            raw_lines,
+            ..
+        } => (
             id.to_string(),
             parent_id.map(|p| p.to_string()),
             data.iter()
-                .map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() })
+                .map(|(k, v)| FieldEntry {
+                    key: k.clone(),
+                    val: v.clone(),
+                })
                 .collect::<Vec<_>>(),
+            raw_lines.as_ref().map(|(s1, s2)| format!("{s1} - {s2}")),
+        ),
+        Event::Single {
+            id,
+            parent_id,
+            data,
+            raw_line,
+            ..
+        } => (
+            id.to_string(),
+            parent_id.map(|p| p.to_string()),
+            data.iter()
+                .map(|(k, v)| FieldEntry {
+                    key: k.clone(),
+                    val: v.clone(),
+                })
+                .collect::<Vec<_>>(),
+            raw_line.as_ref().map(|s| s.to_string()),
         ),
     };
     fields.sort_by(|a, b| a.key.cmp(&b.key));
 
     let tmpl = state.env.get_template("events_detail.html")?;
-    let html = tmpl.render(context! { id => eid, parent_id, fields })?;
+    let html = tmpl.render(context! { id => eid, parent_id, fields, raw_line })?;
     Ok(Html(html))
 }

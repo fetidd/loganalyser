@@ -52,6 +52,7 @@ impl Parser {
         NaiveDateTime,
         HashMap<String, String>,
         Option<Uuid>,
+        Option<String>,
     )> {
         match self {
             Parser::Single(_) => vec![],
@@ -80,6 +81,7 @@ impl Parser {
             NaiveDateTime,
             HashMap<String, String>,
             Option<Uuid>,
+            Option<String>,
         )>,
     ) {
         if let Parser::Span(p) = self {

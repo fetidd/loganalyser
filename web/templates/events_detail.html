@@ -2,14 +2,14 @@
   <td colspan="4">
     <div class="detail-content">
 
-      <div class="detail-meta">
-        <span class="detail-label">id</span>
-        <span class="detail-value">{{ id }}</span>
-        {% if parent_id %}
-        <span class="detail-label">parent_id</span>
-        <span class="detail-value">{{ parent_id }}</span>
-        {% endif %}
-      </div>
+      <!-- <div class="detail-meta"> -->
+        <!-- <span class="detail-label">id</span> -->
+        <!-- <span class="detail-value">{{ id }}</span> -->
+        <!-- {% if parent_id %} -->
+        <!-- <span class="detail-label">parent_id</span> -->
+        <!-- <span class="detail-value">{{ parent_id }}</span> -->
+        <!-- {% endif %} -->
+      <!-- </div> -->
 
       {% if fields %}
       <div class="detail-fields">
@@ -24,6 +24,12 @@
       <span class="detail-empty">no data fields</span>
       {% endif %}
 
+      {% if raw_line %}
+      <div class="detail-meta">
+        <span class="detail-label">raw_line</span>
+        <span class="detail-value">{{ raw_line }}</span>
+      </div>
+      {% endif %}
 
     </div>
   </td>

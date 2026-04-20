@@ -12,4 +12,5 @@ pub struct PendingSpanRecord {
     pub timestamp: NaiveDateTime,
     pub data: HashMap<String, String>,
     pub parent_id: Option<Uuid>,
+    pub raw_line: Option<String>,
 }

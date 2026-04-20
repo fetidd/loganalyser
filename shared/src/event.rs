@@ -12,6 +12,7 @@ pub enum Event {
         data: HashMap<String, String>,
         duration: Duration,
         parent_id: Option<Uuid>,
+        raw_lines: Option<(String, String)>,
     },
     Single {
         id: Uuid,
@@ -19,6 +20,7 @@ pub enum Event {
         timestamp: chrono::NaiveDateTime,
         data: HashMap<String, String>,
         parent_id: Option<Uuid>,
+        raw_line: Option<String>,
     },
 }
 
@@ -34,6 +36,7 @@ impl Event {
         name: &str,
         timestamp: NaiveDateTime,
         data: HashMap<String, String>,
+        raw_line: Option<String>,
     ) -> Event {
         Event::Single {
             id: Uuid::new_v4(),
@@ -41,6 +44,7 @@ impl Event {
             timestamp,
             data,
             parent_id: None,
+            raw_line,
         }
     }
 
@@ -49,6 +53,7 @@ impl Event {
         timestamp: NaiveDateTime,
         data: HashMap<String, String>,
         duration: Duration,
+        raw_lines: Option<(String, String)>,
     ) -> Event {
         Event::Span {
             id: Uuid::new_v4(),
@@ -57,6 +62,7 @@ impl Event {
             data,
             duration,
             parent_id: None,
+            raw_lines,
         }
     }
 
@@ -107,26 +113,18 @@ mod tests {
     }
 
     fn make_single(id: Uuid) -> Event {
-        let mut e = Event::new_single("p", ts(), HashMap::new());
-        let Event::Single {
-            id: ref mut eid, ..
-        } = e
-        else {
-            unreachable!()
-        };
-        *eid = id;
+        let mut e = Event::new_single("p", ts(), HashMap::new(), None);
+        if let Event::Single { id: ref mut eid, .. } = e {
+            *eid = id;
+        }
         e
     }
 
     fn make_span(id: Uuid) -> Event {
-        let mut e = Event::new_span("p", ts(), HashMap::new(), Duration::seconds(1));
-        let Event::Span {
-            id: ref mut eid, ..
-        } = e
-        else {
-            unreachable!()
-        };
-        *eid = id;
+        let mut e = Event::new_span("p", ts(), HashMap::new(), Duration::seconds(1), None);
+        if let Event::Span { id: ref mut eid, .. } = e {
+            *eid = id;
+        }
         e
     }
 
@@ -141,7 +139,7 @@ mod tests {
     fn test_new_single_fields() {
         let timestamp = ts();
         let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
-        let event = Event::new_single("my_parser", timestamp, data.clone());
+        let event = Event::new_single("my_parser", timestamp, data.clone(), None);
         let Event::Single {
             id,
             name,
@@ -161,8 +159,8 @@ mod tests {
     #[test]
     fn test_new_single_unique_ids() {
         let ts = ts();
-        let id1 = Event::new_single("x", ts, HashMap::new()).id();
-        let id2 = Event::new_single("x", ts, HashMap::new()).id();
+        let id1 = Event::new_single("x", ts, HashMap::new(), None).id();
+        let id2 = Event::new_single("x", ts, HashMap::new(), None).id();
         assert_ne!(id1, id2);
     }
 
@@ -171,7 +169,7 @@ mod tests {
         let timestamp = ts();
         let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
         let duration = Duration::seconds(42);
-        let event = Event::new_span("my_parser", timestamp, data.clone(), duration);
+        let event = Event::new_span("my_parser", timestamp, data.clone(), duration, None);
         let Event::Span {
             id,
             name,
@@ -193,8 +191,8 @@ mod tests {
     #[test]
     fn test_new_span_unique_ids() {
         let ts = ts();
-        let id1 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0)).id();
-        let id2 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0)).id();
+        let id1 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0), None).id();
+        let id2 = Event::new_span("x", ts, HashMap::new(), Duration::seconds(0), None).id();
         assert_ne!(id1, id2);
     }
 }

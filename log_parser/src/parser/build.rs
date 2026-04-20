@@ -7,12 +7,6 @@ use crate::error::{Error, Result};
 
 use super::{InternalSingleParser, InternalSpanParser, Parser};
 
-// ── typed config structs ──────────────────────────────────────────────────────
-//
-// Serde handles structural validation: required fields, type checking, and the
-// Single/Span discriminant. Semantic validation (regex compilation, capture group
-// presence, reference field consistency) stays in the build functions below.
-
 #[derive(Debug, Deserialize, Default)]
 struct RawConfig {
     #[serde(default)]
@@ -37,52 +31,56 @@ enum RawParserConfig {
 
 #[derive(Debug, Deserialize)]
 struct RawSingleConfig {
-    name: String,
-    glob: Option<String>,
     pattern: String,
-    timestamp_format: Option<String>,
+    #[serde(flatten)]
+    common: CommonConfig,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawSpanConfig {
-    name: String,
-    glob: Option<String>,
     start_pattern: String,
     end_pattern: String,
     reference_fields: Vec<String>,
-    timestamp_format: Option<String>,
     #[serde(default)]
     nested: Vec<RawParserConfig>,
+    #[serde(flatten)]
+    common: CommonConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommonConfig {
+    name: String,
+    glob: Option<String>,
+    timestamp_format: Option<String>,
+    #[serde(default = "default_include_raw")]
+    include_raw: bool,
+}
+
+fn default_include_raw() -> bool {
+    true
 }
 
 impl RawParserConfig {
     fn glob(&self) -> Option<&str> {
         match self {
-            RawParserConfig::Single(c) => c.glob.as_deref(),
-            RawParserConfig::Span(c) => c.glob.as_deref(),
+            RawParserConfig::Single(c) => c.common.glob.as_deref(),
+            RawParserConfig::Span(c) => c.common.glob.as_deref(),
         }
     }
 
     fn timestamp_format(&self) -> Option<&str> {
         match self {
-            RawParserConfig::Single(c) => c.timestamp_format.as_deref(),
-            RawParserConfig::Span(c) => c.timestamp_format.as_deref(),
+            RawParserConfig::Single(c) => c.common.timestamp_format.as_deref(),
+            RawParserConfig::Span(c) => c.common.timestamp_format.as_deref(),
         }
     }
 }
-
-// ── build context ─────────────────────────────────────────────────────────────
-//
-// Carries inherited values downward into nested parsers. Top-level parsers are
-// built with inherited_ref_fields = &[].
 
 struct BuildCtx<'a> {
     components: &'a HashMap<String, String>,
     timestamp_format: &'a str,
     inherited_ref_fields: &'a [String],
 }
-
-// ── public API ────────────────────────────────────────────────────────────────
 
 impl Parser {
     pub fn from_config_file(config_file: &[u8]) -> Result<HashMap<PathBuf, Vec<Parser>>> {
@@ -113,8 +111,6 @@ impl Parser {
     }
 }
 
-// ── builder functions ─────────────────────────────────────────────────────────
-
 fn build_parser(raw: &RawParserConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
     match raw {
         RawParserConfig::Single(c) => build_single(c, ctx),
@@ -127,15 +123,14 @@ fn build_single(c: &RawSingleConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
     validate_required_fields(&pattern, ["timestamp"])?;
     validate_required_fields(&pattern, ctx.inherited_ref_fields)?;
     Ok(Parser::Single(InternalSingleParser {
-        name: c.name.clone(),
+        name: c.common.name.clone(),
         pattern,
         timestamp_format: ctx.timestamp_format.to_string(),
+        include_raw: c.common.include_raw,
     }))
 }
 
 fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
-    // Full ref_fields = inherited (from parent span) + own.
-    // Nested parsers inherit the full set so they can match against this span.
     let mut ref_fields: Vec<String> = ctx.inherited_ref_fields.to_vec();
     for field in &c.reference_fields {
         if ref_fields.contains(field) {
@@ -145,19 +140,15 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
         }
         ref_fields.push(field.clone());
     }
-
     let start = compile_pattern(&c.start_pattern, ctx.components)?;
     let end = compile_pattern(&c.end_pattern, ctx.components)?;
-
     if start.as_str() == end.as_str() {
         return Err(error("start_pattern and end_pattern must be different"));
     }
-
     for pattern in [&start, &end] {
         validate_required_fields(pattern, ["timestamp"])?;
         validate_required_fields(pattern, &ref_fields)?;
     }
-
     let nested = c
         .nested
         .iter()
@@ -169,8 +160,6 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
                     ));
                 }
             }
-            // Nested parsers inherit this span's full ref_fields and may
-            // override the timestamp format.
             let ts_fmt = n.timestamp_format().unwrap_or(ctx.timestamp_format);
             let nested_ctx = BuildCtx {
                 components: ctx.components,
@@ -180,18 +169,16 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
             build_parser(n, &nested_ctx)
         })
         .collect::<Result<Vec<_>>>()?;
-
     Ok(Parser::Span(InternalSpanParser::new(
-        c.name.clone(),
+        c.common.name.clone(),
         ctx.timestamp_format.to_string(),
         start,
         end,
         nested,
         ref_fields,
+        c.common.include_raw,
     )))
 }
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 fn compile_pattern(pattern: &str, components: &HashMap<String, String>) -> Result<Regex> {
     let mut raw = pattern.to_string();
@@ -208,7 +195,6 @@ fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Res
     let bytes = pattern.as_bytes();
     let len = bytes.len();
     let mut i = 0;
-
     while i < len {
         if bytes[i] == b'\\' {
             result.push(bytes[i] as char);
@@ -219,7 +205,6 @@ fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Res
             }
             continue;
         }
-
         if bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
             let name_start = i + 2;
             let close = pattern[name_start..]
@@ -233,14 +218,11 @@ fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Res
             i = name_start + close + 1;
             continue;
         }
-
         result.push(bytes[i] as char);
         i += 1;
     }
-
     Ok(result)
 }
-
 
 fn validate_required_fields(
     pattern: &Regex,
@@ -265,7 +247,6 @@ fn validate_required_fields(
     }
 }
 
-
 const WHITESPACE: LazyCell<Regex> = std::cell::LazyCell::new(|| Regex::new(r"\s+").unwrap());
 fn replace_whitespace_with_regex(s: &mut String) {
     *s = WHITESPACE.replace_all(s, r"\s+").to_string();
@@ -289,9 +270,11 @@ mod tests {
         build_with_components(toml_str, HashMap::new())
     }
 
-    fn build_with_components(toml_str: &str, components: HashMap<String, String>) -> Result<Parser> {
-        let raw: RawParserConfig =
-            toml::from_str(toml_str).map_err(|e| error(&e.to_string()))?;
+    fn build_with_components(
+        toml_str: &str,
+        components: HashMap<String, String>,
+    ) -> Result<Parser> {
+        let raw: RawParserConfig = toml::from_str(toml_str).map_err(|e| error(&e.to_string()))?;
         let ts_fmt = raw
             .timestamp_format()
             .ok_or_else(|| error("missing timestamp_format"))?;
@@ -306,8 +289,8 @@ mod tests {
     // ── serde structural validation ───────────────────────────────────────────
 
     #[rstest]
-    #[case(r#"type = "single""#)]          // missing name, pattern
-    #[case(r#"type = "span""#)]            // missing name, patterns, reference_fields
+    #[case(r#"type = "single""#)] // missing name, pattern
+    #[case(r#"type = "span""#)] // missing name, patterns, reference_fields
     #[case(r#"name = "x" pattern = "y""#)] // missing type
     #[case(r#"type = "unknown" name = "x""#)] // invalid type tag
     fn test_structural_errors_fail_deserialization(#[case] toml_str: &str) {
@@ -449,7 +432,9 @@ pattern = '(?P<timestamp>${unclosed)'"#,
     fn test_nested_single_inherits_timestamp_format() {
         let parser = build(SPAN_NESTED_INHERITS_TS_FMT).unwrap();
         let Parser::Span(span) = parser else { panic!() };
-        let Parser::Single(nested) = &span.nested[0] else { panic!() };
+        let Parser::Single(nested) = &span.nested[0] else {
+            panic!()
+        };
         assert_eq!(nested.timestamp_format, "%Y-%m-%d %H:%M:%S");
     }
 
@@ -457,7 +442,9 @@ pattern = '(?P<timestamp>${unclosed)'"#,
     fn test_nested_single_overrides_timestamp_format() {
         let parser = build(SPAN_NESTED_OVERRIDES_TS_FMT).unwrap();
         let Parser::Span(span) = parser else { panic!() };
-        let Parser::Single(nested) = &span.nested[0] else { panic!() };
+        let Parser::Single(nested) = &span.nested[0] else {
+            panic!()
+        };
         assert_eq!(nested.timestamp_format, "%Y");
     }
 
@@ -468,6 +455,7 @@ type = "single"
 name = "my_parser"
 timestamp_format = "%Y-%m-%d %H:%M:%S"
 pattern = '(?P<timestamp>\d+) (?P<level>\w+)'
+include_raw = false
 "#;
 
     const SPAN_VALID: &str = r#"

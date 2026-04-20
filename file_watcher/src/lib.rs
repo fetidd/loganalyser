@@ -95,7 +95,7 @@ impl FileWatcher {
                                 && let pending = parser
                                     .pending_spans()
                                     .into_iter()
-                                    .map(|(span_ref, id, timestamp, data, parent_id)| {
+                                    .map(|(span_ref, id, timestamp, data, parent_id, raw_line)| {
                                         PendingSpanRecord {
                                             file_path: path_str.clone(),
                                             parser_name: parser.name().to_string(),
@@ -104,6 +104,7 @@ impl FileWatcher {
                                             timestamp,
                                             data,
                                             parent_id,
+                                            raw_line,
                                         }
                                     })
                                     .collect::<Vec<PendingSpanRecord>>()
@@ -181,6 +182,7 @@ fn restore_pending_state(
                     record.timestamp,
                     record.data,
                     record.parent_id,
+                    record.raw_line,
                 )]);
             }
         }
@@ -301,6 +303,7 @@ reference_fields = ["ref"]
                 .unwrap(),
             data: HashMap::from([("ref".to_string(), span_ref.to_string())]),
             parent_id: None,
+            raw_line: None,
         }
     }
 

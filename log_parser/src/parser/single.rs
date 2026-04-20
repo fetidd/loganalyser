@@ -8,6 +8,7 @@ pub struct InternalSingleParser {
     pub name: String,
     pub pattern: Regex,
     pub timestamp_format: String,
+    pub include_raw: bool,
 }
 
 impl InternalSingleParser {
@@ -25,7 +26,12 @@ impl InternalSingleParser {
             };
             let mut capture_names = self.pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &captures);
-            Some(Event::new_single(&self.name, timestamp, data))
+            Some(Event::new_single(
+                &self.name,
+                timestamp,
+                data,
+                self.include_raw.then(|| input.to_string()),
+            ))
         } else {
             None
         }
@@ -58,6 +64,7 @@ mod tests {
             "test",
             NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
             data_map,
+            None,
         );
         set_id(&mut e, TEST_ID);
         e
@@ -94,6 +101,7 @@ mod tests {
             name: "test".into(),
             pattern: Regex::new(pattern).unwrap(),
             timestamp_format: TS_FMT.into(),
+            include_raw: false,
         };
         let mut actual = parser.parse_line_with_context(log);
         actual.iter_mut().for_each(|f| set_id(f, TEST_ID));
@@ -107,6 +115,7 @@ mod tests {
             name: "test".into(),
             pattern: Regex::new(r"(?P<timestamp>[0-9/]+ [0-9:]+)").unwrap(),
             timestamp_format: TS_FMT.into(), // expects "%Y-%m-%d %H:%M:%S", not slash format
+            include_raw: false,
         };
         let actual = parser.parse_line_with_context("15/01/2026 08:00:00");
         assert!(actual.is_none());
@@ -123,6 +132,7 @@ mod tests {
             name: "test".into(),
             pattern: Regex::new(pattern).unwrap(),
             timestamp_format: TS_FMT.into(),
+            include_raw: false,
         };
         let actual = parser.parse_line_with_context(line);
         if [&actual, &expected].into_iter().all(Option::is_some) {

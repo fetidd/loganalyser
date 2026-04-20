@@ -58,6 +58,7 @@ impl EventStorage for MySqlEventStore {
                 .bind(e.duration_ms)
                 .bind(e.parent_id)
                 .bind(e.data_json)
+                .bind(e.raw_line)
                 .execute(&mut *tx)
                 .await?;
         }
@@ -68,7 +69,7 @@ impl EventStorage for MySqlEventStore {
     async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!(
-            "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data FROM events{where_sql}",
+            "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",
         );
         let mut query = sqlx::query(&query);
         for b in bindings {
@@ -93,6 +94,7 @@ impl EventStorage for MySqlEventStore {
                 .map(|s| Uuid::parse_str(&s))
                 .transpose()?;
             let duration_ms: Option<i64> = row.try_get("duration_ms")?;
+            let raw_line = row.try_get::<Option<String>, _>("raw_line")?;
             events.push(build_event(
                 id,
                 event_type,
@@ -101,6 +103,7 @@ impl EventStorage for MySqlEventStore {
                 data_json,
                 parent_id,
                 duration_ms,
+                raw_line,
             )?);
         }
         Ok(events)
@@ -141,6 +144,7 @@ impl EventStorage for MySqlEventStore {
 ///     timestamp   DATETIME(6)  NOT NULL,
 ///     duration_ms BIGINT           NULL,
 ///     parent_id   CHAR(36)         NULL,
+///     raw_line    TEXT             NULL,
 ///     data        TEXT         NOT NULL
 /// );
 /// ```

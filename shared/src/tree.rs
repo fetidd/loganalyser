@@ -65,10 +65,10 @@ mod tests {
 
     #[test]
     fn test_build_tree_nests_children_under_parent() {
-        let parent = Event::new_span("outer", ts(), HashMap::new(), Duration::seconds(5));
+        let parent = Event::new_span("outer", ts(), HashMap::new(), Duration::seconds(5), None);
         let parent_id = parent.id();
-        let child1 = Event::new_single("inner_a", ts(), HashMap::new()).with_parent(parent_id);
-        let child2 = Event::new_single("inner_b", ts(), HashMap::new()).with_parent(parent_id);
+        let child1 = Event::new_single("inner_a", ts(), HashMap::new(), None).with_parent(parent_id);
+        let child2 = Event::new_single("inner_b", ts(), HashMap::new(), None).with_parent(parent_id);
 
         let tree = build_tree(vec![child1, child2, parent]);
 
@@ -82,8 +82,8 @@ mod tests {
 
     #[test]
     fn test_build_tree_flat_when_no_parents() {
-        let a = Event::new_single("a", ts(), HashMap::new());
-        let b = Event::new_single("b", ts(), HashMap::new());
+        let a = Event::new_single("a", ts(), HashMap::new(), None);
+        let b = Event::new_single("b", ts(), HashMap::new(), None);
         let tree = build_tree(vec![a, b]);
         assert_eq!(tree.len(), 2);
         assert!(tree.iter().all(|n| n.children.is_empty()));
