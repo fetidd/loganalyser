@@ -10,9 +10,7 @@ use tokio::{
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    let config_path = std::env::args()
-        .nth(1)
-        .ok_or(anyhow::anyhow!("Usage: file_watcher <config_path>"))?;
+    let config_path = std::env::args().nth(1).ok_or(anyhow::anyhow!("Usage: file_watcher <config_path>"))?;
     let config_file = fs::read(config_path).await?;
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     let mut watcher = FileWatcher::new(config_file).await?.with_receiver(rx);

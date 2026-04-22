@@ -31,10 +31,7 @@ impl Dialect for MySqlDialect {
     }
 
     fn json_condition(&mut self, field: &str, op: &str, val: String) -> (String, Vec<ParamValue>) {
-        (
-            format!("data->>? {op} ?"),
-            vec![format!("$.{field}").into(), val.into()],
-        )
+        (format!("data->>? {op} ?"), vec![format!("$.{field}").into(), val.into()])
     }
 }
 
@@ -68,9 +65,7 @@ impl EventStorage for MySqlEventStore {
 
     async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
-        let query = format!(
-            "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",
-        );
+        let query = format!("SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",);
         let mut query = sqlx::query(&query);
         for b in bindings {
             query = match b {
@@ -82,42 +77,21 @@ impl EventStorage for MySqlEventStore {
 
         let mut events = Vec::with_capacity(rows.len());
         for row in rows {
-            let id: Uuid = row
-                .try_get::<String, _>("id")
-                .and_then(|s| Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e))))?;
+            let id: Uuid = row.try_get::<String, _>("id").and_then(|s| Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e))))?;
             let event_type: String = row.try_get("event_type")?;
             let name: String = row.try_get("name")?;
             let timestamp: NaiveDateTime = row.try_get("timestamp")?;
             let data_json: String = row.try_get("data")?;
-            let parent_id: Option<Uuid> = row
-                .try_get::<Option<String>, _>("parent_id")?
-                .map(|s| Uuid::parse_str(&s))
-                .transpose()?;
+            let parent_id: Option<Uuid> = row.try_get::<Option<String>, _>("parent_id")?.map(|s| Uuid::parse_str(&s)).transpose()?;
             let duration_ms: Option<i64> = row.try_get("duration_ms")?;
             let raw_line = row.try_get::<Option<String>, _>("raw_line")?;
-            events.push(build_event(
-                id,
-                event_type,
-                name,
-                timestamp,
-                data_json,
-                parent_id,
-                duration_ms,
-                raw_line,
-            )?);
+            events.push(build_event(id, event_type, name, timestamp, data_json, parent_id, duration_ms, raw_line)?);
         }
         Ok(events)
     }
 
-    async fn save_pending(
-        &self,
-        file_path: &str,
-        parser_name: &str,
-        records: &[PendingSpanRecord],
-    ) -> Result<()> {
-        self.sidecar
-            .save_pending(file_path, parser_name, records)
-            .await
+    async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
+        self.sidecar.save_pending(file_path, parser_name, records).await
     }
 
     async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
@@ -249,15 +223,13 @@ mod tests {
         Filter::new().with_data("env", Like("%prod%")).with_timestamp(Gte("2025-01-01 00:00:00")),
         (" WHERE data->>? LIKE ? AND timestamp >= ?".into(), vec!["$.env".into(), "%prod%".into(), "2025-01-01 00:00:00".into()])
     )]
-    fn test_get_where_sql(
-        #[case] filter: impl Into<Filter>,
-        #[case] expected: (String, Vec<ParamValue>),
-    ) {
+    #[case(
+        Filter::new().with_raw_line(Like("errormessage=FatalError")),
+        (" WHERE raw_line LIKE ?".into(), vec!["%errormessage=FatalError%".into()])
+    )]
+    fn test_get_where_sql(#[case] filter: impl Into<Filter>, #[case] expected: (String, Vec<ParamValue>)) {
         let mut expected_params = Params::new();
         expected_params.add(&expected.0, &expected.1);
-        assert_eq!(
-            MySqlEventStore::get_where_sql(&filter.into()),
-            expected_params
-        );
+        assert_eq!(MySqlEventStore::get_where_sql(&filter.into()), expected_params);
     }
 }

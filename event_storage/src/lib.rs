@@ -6,9 +6,9 @@ use thiserror::Error;
 
 pub mod config;
 pub mod event_filter;
-pub mod pending;
 pub(crate) mod memory;
 pub(crate) mod mysql;
+pub mod pending;
 pub(crate) mod sql;
 pub(crate) mod sqlite;
 
@@ -38,12 +38,7 @@ pub trait EventStorage: Send + Sync + std::fmt::Debug {
     async fn store(&self, events: &[Event]) -> Result<()>;
     async fn load(&self, filter: Filter) -> Result<Vec<Event>>;
 
-    async fn save_pending(
-        &self,
-        _file_path: &str,
-        _parser_name: &str,
-        _records: &[PendingSpanRecord],
-    ) -> Result<()> {
+    async fn save_pending(&self, _file_path: &str, _parser_name: &str, _records: &[PendingSpanRecord]) -> Result<()> {
         Ok(())
     }
 
@@ -70,17 +65,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_in_memory_storage() {
-        let event = Event::new_single(
-            "single1",
-            shared::datetime_from("2026-01-01").unwrap(),
-            HashMap::new(),
-            None,
-        );
+        let event = Event::new_single("single1", shared::datetime_from("2026-01-01").unwrap(), HashMap::new(), None);
         let store = MemoryEventStore::new_in_memory().await;
-        store
-            .store(&[event.clone()])
-            .await
-            .expect("failed to store");
+        store.store(&[event.clone()]).await.expect("failed to store");
         let read = store.load(Filter::new()).await.expect("failed to load");
         assert_eq!(event, read[0]);
     }

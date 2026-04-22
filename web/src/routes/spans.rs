@@ -12,18 +12,11 @@ use crate::{
 };
 
 fn storage_err(e: event_storage::Error) -> AppError {
-    AppError(minijinja::Error::new(
-        minijinja::ErrorKind::InvalidOperation,
-        e.to_string(),
-    ))
+    AppError(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
 }
 
 fn fmt_duration(ms: i64) -> String {
-    if ms < 1000 {
-        format!("{ms}ms")
-    } else {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    }
+    if ms < 1000 { format!("{ms}ms") } else { format!("{:.1}s", ms as f64 / 1000.0) }
 }
 
 #[derive(Serialize)]
@@ -39,14 +32,12 @@ pub async fn handler(State(state): State<AppState>) -> HtmlResult {
     let mut root_spans: Vec<RootSpan> = events
         .iter()
         .filter_map(|e| match e {
-            Event::Span { id, name, timestamp, duration, parent_id: None, .. } => {
-                Some(RootSpan {
-                    id: id.to_string(),
-                    name: name.clone(),
-                    timestamp: timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
-                    duration_label: fmt_duration(duration.num_milliseconds()),
-                })
-            }
+            Event::Span { id, name, timestamp, duration, parent_id: None, .. } => Some(RootSpan {
+                id: id.to_string(),
+                name: name.clone(),
+                timestamp: timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
+                duration_label: fmt_duration(duration.num_milliseconds()),
+            }),
             _ => None,
         })
         .collect();
@@ -93,24 +84,18 @@ struct SpanRow {
 }
 
 fn name_hue(name: &str) -> u64 {
-    name.bytes()
-        .fold(2166136261u64, |a, b| a.wrapping_mul(16777619).wrapping_add(b as u64))
-        % 360
+    name.bytes().fold(2166136261u64, |a, b| a.wrapping_mul(16777619).wrapping_add(b as u64)) % 360
 }
 
 fn event_ts_ms(e: &Event) -> i64 {
     match e {
-        Event::Span { timestamp, .. } | Event::Single { timestamp, .. } => {
-            timestamp.and_utc().timestamp_millis()
-        }
+        Event::Span { timestamp, .. } | Event::Single { timestamp, .. } => timestamp.and_utc().timestamp_millis(),
     }
 }
 
 fn event_end_ms(e: &Event) -> i64 {
     match e {
-        Event::Span { timestamp, duration, .. } => {
-            timestamp.and_utc().timestamp_millis() + duration.num_milliseconds()
-        }
+        Event::Span { timestamp, duration, .. } => timestamp.and_utc().timestamp_millis() + duration.num_milliseconds(),
         Event::Single { timestamp, .. } => timestamp.and_utc().timestamp_millis(),
     }
 }
@@ -131,13 +116,7 @@ fn count_descendants(node: &EventNode) -> usize {
     node.children.iter().map(|c| 1 + count_descendants(c)).sum()
 }
 
-fn flatten(
-    node: &EventNode,
-    depth: usize,
-    root_start_ms: i64,
-    total_ms: i64,
-    rows: &mut Vec<SpanRow>,
-) {
+fn flatten(node: &EventNode, depth: usize, root_start_ms: i64, total_ms: i64, rows: &mut Vec<SpanRow>) {
     let ts_ms = event_ts_ms(&node.event);
     let offset_ms = (ts_ms - root_start_ms).max(0);
     let left_pct = offset_ms as f64 / total_ms as f64 * 100.0;
@@ -151,18 +130,11 @@ fn flatten(
         Event::Single { .. } => ("single", None, 0.0_f64),
     };
 
-    let mut fields: Vec<FieldEntry> = node
-        .event
-        .data()
-        .iter()
-        .map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() })
-        .collect();
+    let mut fields: Vec<FieldEntry> = node.event.data().iter().map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() }).collect();
     fields.sort_by(|a, b| a.key.cmp(&b.key));
 
     let timestamp = match &node.event {
-        Event::Span { timestamp, .. } | Event::Single { timestamp, .. } => {
-            timestamp.format("%H:%M:%S%.3f").to_string()
-        }
+        Event::Span { timestamp, .. } | Event::Single { timestamp, .. } => timestamp.format("%H:%M:%S%.3f").to_string(),
     };
 
     let parent_id = node.event.parent_id().map(|p| p.to_string());
@@ -202,10 +174,7 @@ fn find_node<'a>(nodes: &'a [EventNode], id: &str) -> Option<&'a EventNode> {
     None
 }
 
-pub async fn waterfall(
-    State(state): State<AppState>,
-    Query(query): Query<WaterfallQuery>,
-) -> HtmlResult {
+pub async fn waterfall(State(state): State<AppState>, Query(query): Query<WaterfallQuery>) -> HtmlResult {
     let events = state.store.load(Filter::new()).await.map_err(storage_err)?;
     let tree = build_tree(events);
     let target_id = query.id.trim();
@@ -225,13 +194,7 @@ pub async fn waterfall(
     let (root_start_ms, root_end_ms) = subtree_extent(root_node);
     let total_ms = (root_end_ms - root_start_ms).max(1);
 
-    let ticks: Vec<Tick> = [0u8, 25, 50, 75, 100]
-        .iter()
-        .map(|&pct| Tick {
-            pct,
-            label: fmt_duration(total_ms * pct as i64 / 100),
-        })
-        .collect();
+    let ticks: Vec<Tick> = [0u8, 25, 50, 75, 100].iter().map(|&pct| Tick { pct, label: fmt_duration(total_ms * pct as i64 / 100) }).collect();
 
     let mut rows = vec![];
     flatten(root_node, 0, root_start_ms, total_ms, &mut rows);

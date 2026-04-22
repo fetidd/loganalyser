@@ -37,14 +37,10 @@ pub enum StorageType {
     Sqlite,
 }
 
-
 pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn EventStorage>> {
     let s: Arc<dyn EventStorage> = match config.storage_type {
         StorageType::Mysql => {
-            let conn_str = config
-                .connection_string
-                .as_deref()
-                .ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
+            let conn_str = config.connection_string.as_deref().ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
             let conn_str = expand_env_vars(conn_str)?;
             let mysql_pool = MySqlPool::connect(&conn_str).await?;
 
@@ -53,30 +49,18 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn Even
                 None => shared::env::default_state_db_path(),
             };
             if let Some(parent) = state_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    anyhow!("cannot create state dir {:?}: {e}", parent)
-                })?;
+                std::fs::create_dir_all(parent).map_err(|e| anyhow!("cannot create state dir {:?}: {e}", parent))?;
             }
-            let state_path_str = state_path
-                .to_str()
-                .ok_or_else(|| anyhow!("state_db_path contains non-UTF8 characters"))?;
-            let sqlite_opts = SqliteConnectOptions::new()
-                .filename(state_path_str)
-                .create_if_missing(true);
-            let sidecar =
-                SqliteEventStore::from_pool(SqlitePool::connect_with(sqlite_opts).await?).await;
+            let state_path_str = state_path.to_str().ok_or_else(|| anyhow!("state_db_path contains non-UTF8 characters"))?;
+            let sqlite_opts = SqliteConnectOptions::new().filename(state_path_str).create_if_missing(true);
+            let sidecar = SqliteEventStore::from_pool(SqlitePool::connect_with(sqlite_opts).await?).await;
 
             Arc::new(MySqlEventStore::new(mysql_pool, sidecar))
         }
         StorageType::Sqlite => {
-            let conn_str = config
-                .connection_string
-                .as_deref()
-                .ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
+            let conn_str = config.connection_string.as_deref().ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
             let conn_str = expand_env_vars(conn_str)?;
-            let opts = SqliteConnectOptions::new()
-                .filename(&conn_str)
-                .create_if_missing(true);
+            let opts = SqliteConnectOptions::new().filename(&conn_str).create_if_missing(true);
             Arc::new(SqliteEventStore::from_pool(SqlitePool::connect_with(opts).await?).await)
         }
         StorageType::Memory => Arc::new(SqliteEventStore::new_in_memory().await),

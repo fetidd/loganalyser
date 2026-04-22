@@ -14,24 +14,13 @@ pub struct InternalSingleParser {
 impl InternalSingleParser {
     pub(super) fn parse_line_with_context(&mut self, input: &str) -> Option<Event> {
         if let Some(captures) = self.pattern.captures(input) {
-            let Some(timestamp) =
-                super::extract_timestamp(&captures["timestamp"], &self.timestamp_format)
-            else {
-                warn!(
-                    line = input,
-                    format = self.timestamp_format,
-                    "failed to parse timestamp"
-                );
+            let Some(timestamp) = super::extract_timestamp(&captures["timestamp"], &self.timestamp_format) else {
+                warn!(line = input, format = self.timestamp_format, "failed to parse timestamp");
                 return None;
             };
             let mut capture_names = self.pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &captures);
-            Some(Event::new_single(
-                &self.name,
-                timestamp,
-                data,
-                self.include_raw.then(|| input.to_string()),
-            ))
+            Some(Event::new_single(&self.name, timestamp, data, self.include_raw.then(|| input.to_string())))
         } else {
             None
         }
@@ -60,12 +49,7 @@ mod tests {
 
     fn test_single(data: &[(&str, &str)], timestamp: &str) -> Event {
         let (ts, data_map) = common_test_data(data, timestamp);
-        let mut e = Event::new_single(
-            "test",
-            NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
-            data_map,
-            None,
-        );
+        let mut e = Event::new_single("test", NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(), data_map, None);
         set_id(&mut e, TEST_ID);
         e
     }
@@ -82,21 +66,13 @@ mod tests {
         Some(test_single(&[("level", "INFO"), ("message", "Server started")], "2026-03-05 08:00:00")),
     )]
     #[case(r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", "", None)]
-    #[case(
-        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
-        "   \n  \n",
-        None
-    )] // whitespace-only lines
+    #[case(r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", "   \n  \n", None)] // whitespace-only lines
     #[case(
         r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})",
         "2026-01-01 00:00:00 2026-02-02 00:00:00",
         Some(test_single(&[], "2026-01-01 00:00:00")),
     )] // only first match per line is captured
-    fn test_single_parse(
-        #[case] pattern: &str,
-        #[case] log: &str,
-        #[case] expected: Option<Event>,
-    ) {
+    fn test_single_parse(#[case] pattern: &str, #[case] log: &str, #[case] expected: Option<Event>) {
         let mut parser = InternalSingleParser {
             name: "test".into(),
             pattern: Regex::new(pattern).unwrap(),

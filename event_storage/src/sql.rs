@@ -76,14 +76,7 @@ impl EventForInsert {
                 data_json: serde_json::to_string(data)?,
                 raw_line: raw_lines.as_ref().map(|(s1, s2)| format!("{s1}\n{s2}")),
             }),
-            Event::Single {
-                id,
-                name,
-                timestamp,
-                data,
-                parent_id,
-                raw_line,
-            } => Ok(Self {
+            Event::Single { id, name, timestamp, data, parent_id, raw_line } => Ok(Self {
                 id: id.to_string(),
                 event_type: "single",
                 name: name.clone(),
@@ -102,16 +95,7 @@ impl EventForInsert {
     }
 }
 
-pub(crate) fn build_event(
-    id: Uuid,
-    event_type: String,
-    name: String,
-    timestamp: NaiveDateTime,
-    data_json: String,
-    parent_id: Option<Uuid>,
-    duration_ms: Option<i64>,
-    raw_line: Option<String>,
-) -> crate::Result<Event> {
+pub(crate) fn build_event(id: Uuid, event_type: String, name: String, timestamp: NaiveDateTime, data_json: String, parent_id: Option<Uuid>, duration_ms: Option<i64>, raw_line: Option<String>) -> crate::Result<Event> {
     let data: HashMap<String, String> = serde_json::from_str(&data_json)?;
     match event_type.as_str() {
         "span" => Ok(Event::Span {
@@ -131,17 +115,8 @@ pub(crate) fn build_event(
                 raw_lines
             }),
         }),
-        "single" => Ok(Event::Single {
-            id,
-            name,
-            timestamp,
-            data,
-            parent_id,
-            raw_line,
-        }),
-        other => Err(crate::Error::Storage(format!(
-            "unknown event_type: {other}"
-        ))),
+        "single" => Ok(Event::Single { id, name, timestamp, data, parent_id, raw_line }),
+        other => Err(crate::Error::Storage(format!("unknown event_type: {other}"))),
     }
 }
 
@@ -152,7 +127,7 @@ pub(crate) trait Dialect {
 
 pub(crate) fn build_where(filter: &Filter, dialect: &mut impl Dialect) -> Params {
     let mut params = Params::new();
-    if let Some(expr) = filter.expr() {
+    if let Some(expr) = filter.expr().take() {
         build_expr(expr, &mut params, false, dialect);
         params.0 = format!(" WHERE {}", params.0);
     }
@@ -175,6 +150,7 @@ fn build_predicate(predicate: &Predicate, params: &mut Params, dialect: &mut imp
         Predicate::ParentId(cmp) => build_string_column("parent_id", cmp, params, dialect),
         Predicate::Duration(cmp) => build_i64_column("duration_ms", cmp, params, dialect),
         Predicate::Name(cmp) => build_string_column("name", cmp, params, dialect),
+        Predicate::RawLine(cmp) => build_string_column("raw_line", cmp, params, dialect),
     }
 }
 
@@ -193,34 +169,29 @@ fn build_data(cmp: &Cmp<String>, params: &mut Params, dialect: &mut impl Dialect
     }
 }
 
-fn build_string_column(
-    column: &str,
-    cmp: &Cmp<String>,
-    params: &mut Params,
-    dialect: &mut impl Dialect,
-) {
+fn build_string_column(column: &str, cmp: &Cmp<String>, params: &mut Params, dialect: &mut impl Dialect) {
     match cmp {
         Cmp::In(vals) => {
-            let placeholders = vals
-                .iter()
-                .map(|_| dialect.placeholder())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let placeholders = vals.iter().map(|_| dialect.placeholder()).collect::<Vec<_>>().join(", ");
             let binds: Vec<ParamValue> = vals.iter().map(|v| v.clone().into()).collect();
             params.add(&format!("{column} IN ({placeholders})"), &binds);
         }
         other => {
-            let (op, val) = match other {
-                Cmp::Eq(v) => ("=", v),
-                Cmp::Lt(v) => ("<", v),
-                Cmp::Gt(v) => (">", v),
-                Cmp::Lte(v) => ("<=", v),
-                Cmp::Gte(v) => (">=", v),
-                Cmp::Like(v) => ("LIKE", v),
+            let (op, val): (&str, String) = match other {
+                Cmp::Eq(v) => ("=", v.clone()),
+                Cmp::Lt(v) => ("<", v.clone()),
+                Cmp::Gt(v) => (">", v.clone()),
+                Cmp::Lte(v) => ("<=", v.clone()),
+                Cmp::Gte(v) => (">=", v.clone()),
+                Cmp::Like(v) => {
+                    // TODO annoyingly need to allocate another String here, can this be done with &str all the way through?
+                    let v = if !v.starts_with('%') && !v.ends_with('%') { format!("%{}%", &v) } else { v.clone() };
+                    ("LIKE", v)
+                }
                 _ => panic!("{column} can not be filtered by {other:?}"),
             };
             let ph = dialect.placeholder();
-            params.add(&format!("{column} {op} {ph}"), &[val.clone().into()]);
+            params.add(&format!("{column} {op} {ph}"), &[val.into()]);
         }
     }
 }
@@ -228,13 +199,8 @@ fn build_string_column(
 fn build_i64_column(column: &str, cmp: &Cmp<i64>, params: &mut Params, dialect: &mut impl Dialect) {
     match cmp {
         Cmp::In(vals) => {
-            let placeholders = vals
-                .iter()
-                .map(|_| dialect.placeholder())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let binds: Vec<ParamValue> =
-                vals.iter().map(|v| ParamValue::SignedNumber(*v)).collect();
+            let placeholders = vals.iter().map(|_| dialect.placeholder()).collect::<Vec<_>>().join(", ");
+            let binds: Vec<ParamValue> = vals.iter().map(|v| ParamValue::SignedNumber(*v)).collect();
             params.add(&format!("{column} IN ({placeholders})"), &binds);
         }
         other => {
@@ -247,10 +213,7 @@ fn build_i64_column(column: &str, cmp: &Cmp<i64>, params: &mut Params, dialect: 
                 _ => panic!("{column} can not be filtered by {other:?}"),
             };
             let ph = dialect.placeholder();
-            params.add(
-                &format!("{column} {op} {ph}"),
-                &[ParamValue::SignedNumber(*val)],
-            );
+            params.add(&format!("{column} {op} {ph}"), &[ParamValue::SignedNumber(*val)]);
         }
     }
 }

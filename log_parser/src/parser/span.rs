@@ -22,15 +22,7 @@ pub struct InternalSpanParser {
 }
 
 impl InternalSpanParser {
-    pub(super) fn new(
-        name: String,
-        timestamp_format: String,
-        start_pattern: Regex,
-        end_pattern: Regex,
-        nested: Vec<Parser>,
-        reference_fields: Vec<String>,
-        include_raw: bool,
-    ) -> Self {
+    pub(super) fn new(name: String, timestamp_format: String, start_pattern: Regex, end_pattern: Regex, nested: Vec<Parser>, reference_fields: Vec<String>, include_raw: bool) -> Self {
         Self {
             name,
             timestamp_format,
@@ -54,25 +46,14 @@ impl InternalSpanParser {
 
     pub(super) fn parse_line_with_context(&mut self, line: &str) -> Option<Event> {
         if let Some(start_captures) = self.start_pattern.captures(line) {
-            let Some(timestamp) =
-                super::extract_timestamp(&start_captures["timestamp"], &self.timestamp_format)
-            else {
-                warn!(
-                    line,
-                    format = self.timestamp_format,
-                    "failed to parse start timestamp"
-                );
+            let Some(timestamp) = super::extract_timestamp(&start_captures["timestamp"], &self.timestamp_format) else {
+                warn!(line, format = self.timestamp_format, "failed to parse start timestamp");
                 return None;
             };
             let mut capture_names = self.start_pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &start_captures);
             let span_reference = self.extract_span_reference(&data);
-            let pending_span = PendingSpan::new(
-                timestamp,
-                data,
-                None,
-                self.include_raw.then(|| line.to_string()),
-            );
+            let pending_span = PendingSpan::new(timestamp, data, None, self.include_raw.then(|| line.to_string()));
             if self.pending.contains(&span_reference) {
                 tracing::warn!("pending span {span_reference:?} found multiple times! {line}");
             } else {
@@ -84,14 +65,8 @@ impl InternalSpanParser {
             let mut data = super::extract_data(&mut capture_names, &end_captures);
             let span_reference = self.extract_span_reference(&data);
             if let Some((_pending_reference, pending_span)) = self.pending.remove(&span_reference) {
-                let Some(end_timestamp) =
-                    super::extract_timestamp(&end_captures["timestamp"], &self.timestamp_format)
-                else {
-                    warn!(
-                        line,
-                        format = self.timestamp_format,
-                        "failed to parse end timestamp"
-                    );
+                let Some(end_timestamp) = super::extract_timestamp(&end_captures["timestamp"], &self.timestamp_format) else {
+                    warn!(line, format = self.timestamp_format, "failed to parse end timestamp");
                     return None;
                 };
                 data.extend(pending_span.data);
@@ -103,14 +78,7 @@ impl InternalSpanParser {
                     data,
                     duration,
                     parent_id: pending_span.parent_id,
-                    raw_lines: self.include_raw.then(|| {
-                        (
-                            pending_span
-                                .raw_line
-                                .expect("pending span missing raw_line"),
-                            line.to_string(),
-                        )
-                    }),
+                    raw_lines: self.include_raw.then(|| (pending_span.raw_line.expect("pending span missing raw_line"), line.to_string())),
                 })
             } else {
                 None
@@ -118,17 +86,10 @@ impl InternalSpanParser {
         } else {
             for parser in self.nested.iter_mut() {
                 if let Some(event) = parser.parse_line_with_context(line) {
-                    let parent_id =
-                        self.pending
-                            .spans
-                            .iter()
-                            .find_map(|(span_ref, pending_span)| {
-                                let matches =
-                                    self.reference_fields.iter().zip(span_ref.0.iter()).all(
-                                        |(field, value)| event.data().get(field) == Some(value),
-                                    );
-                                matches.then_some(pending_span.id)
-                            });
+                    let parent_id = self.pending.spans.iter().find_map(|(span_ref, pending_span)| {
+                        let matches = self.reference_fields.iter().zip(span_ref.0.iter()).all(|(field, value)| event.data().get(field) == Some(value));
+                        matches.then_some(pending_span.id)
+                    });
                     return if let Some(pid) = parent_id {
                         Some(event.with_parent(pid))
                     } else {
@@ -152,65 +113,26 @@ impl InternalSpanParser {
         self.pending.dirty
     }
 
-    pub fn pending_spans(
-        &self,
-    ) -> Vec<(
-        Vec<String>,
-        Uuid,
-        NaiveDateTime,
-        HashMap<String, String>,
-        Option<Uuid>,
-        Option<String>,
-    )> {
+    pub fn pending_spans(&self) -> Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)> {
         self.pending
             .spans
             .iter()
-            .map(
-                |(
-                    span_ref,
-                    PendingSpan {
-                        id,
-                        timestamp,
-                        data,
-                        parent_id,
-                        raw_line,
-                    },
-                )| {
-                    (
-                        span_ref.0.clone(),
-                        *id,
-                        *timestamp,
-                        data.clone(),
-                        *parent_id,
-                        raw_line.clone(), // TODO can this use refs?
-                    )
-                },
-            )
+            .map(|(span_ref, PendingSpan { id, timestamp, data, parent_id, raw_line })| {
+                (
+                    span_ref.0.clone(),
+                    *id,
+                    *timestamp,
+                    data.clone(),
+                    *parent_id,
+                    raw_line.clone(), // TODO can this use refs?
+                )
+            })
             .collect()
     }
 
-    pub fn restore_pending(
-        &mut self,
-        spans: Vec<(
-            Vec<String>,
-            Uuid,
-            NaiveDateTime,
-            HashMap<String, String>,
-            Option<Uuid>,
-            Option<String>,
-        )>,
-    ) {
+    pub fn restore_pending(&mut self, spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)>) {
         for (span_ref_parts, id, timestamp, data, parent_id, raw_line) in spans {
-            self.pending.spans.insert(
-                SpanReference(span_ref_parts),
-                PendingSpan {
-                    id,
-                    timestamp,
-                    data,
-                    parent_id,
-                    raw_line,
-                },
-            );
+            self.pending.spans.insert(SpanReference(span_ref_parts), PendingSpan { id, timestamp, data, parent_id, raw_line });
         }
     }
 }
@@ -228,12 +150,7 @@ pub(crate) struct PendingSpan {
 }
 
 impl PendingSpan {
-    fn new(
-        timestamp: NaiveDateTime,
-        data: HashMap<String, String>,
-        parent_id: Option<Uuid>,
-        raw_line: Option<String>,
-    ) -> Self {
+    fn new(timestamp: NaiveDateTime, data: HashMap<String, String>, parent_id: Option<Uuid>, raw_line: Option<String>) -> Self {
         Self {
             timestamp,
             data,
@@ -289,20 +206,12 @@ mod tests {
     }
 
     const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
-    const START: &str =
-        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+START";
-    const END: &str =
-        r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+END";
+    const START: &str = r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+START";
+    const END: &str = r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+END";
 
     fn test_span(data: &[(&str, &str)], timestamp: &str, duration: i64) -> Event {
         let (ts, data_map) = common_test_data(data, timestamp);
-        let mut e = Event::new_span(
-            "test",
-            NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(),
-            data_map,
-            Duration::new(duration, 0).unwrap(),
-            None,
-        );
+        let mut e = Event::new_span("test", NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(), data_map, Duration::new(duration, 0).unwrap(), None);
         set_id(&mut e, TEST_ID);
         e
     }
@@ -355,12 +264,7 @@ mod tests {
 2026-01-01 00:00:00 abc01 END"#,
         vec![test_span(&[("ref", "abc01")], "2026-01-01 00:00:00", 0)],
     )]
-    fn test_span_parse(
-        #[case] start_pattern: &str,
-        #[case] end_pattern: &str,
-        #[case] log: &str,
-        #[case] expected: Vec<Event>,
-    ) {
+    fn test_span_parse(#[case] start_pattern: &str, #[case] end_pattern: &str, #[case] log: &str, #[case] expected: Vec<Event>) {
         let mut parser = InternalSpanParser::new(
             "test".into(),
             TS_FMT.into(),
@@ -368,20 +272,14 @@ mod tests {
             Regex::new(end_pattern).unwrap(),
             vec![Parser::Single(InternalSingleParser {
                 name: "test_inner".into(),
-                pattern: Regex::new(
-                    r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+nested",
-                )
-                .unwrap(),
+                pattern: Regex::new(r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+nested").unwrap(),
                 timestamp_format: TS_FMT.to_string(),
                 include_raw: false,
             })],
             vec!["ref".into()],
-            false
+            false,
         );
-        let mut actual: Vec<Event> = log
-            .lines()
-            .filter_map(|line| parser.parse_line_with_context(line))
-            .collect();
+        let mut actual: Vec<Event> = log.lines().filter_map(|line| parser.parse_line_with_context(line)).collect();
         actual.iter_mut().for_each(|f| set_id(f, TEST_ID));
         assert_eq!(actual, expected);
     }
@@ -399,31 +297,21 @@ mod tests {
             Regex::new(END).unwrap(),
             vec![Parser::Single(InternalSingleParser {
                 name: "test_inner".into(),
-                pattern: Regex::new(
-                    r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+nested",
-                )
-                .unwrap(),
+                pattern: Regex::new(r"(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(?P<ref>[a-z0-9]{5})\s+nested").unwrap(),
                 timestamp_format: TS_FMT.to_string(),
                 include_raw: false,
             })],
             vec!["ref".into()],
-false
+            false,
         );
-        let events: Vec<Event> = log
-            .lines()
-            .filter_map(|line| parser.parse_line_with_context(line))
-            .collect();
+        let events: Vec<Event> = log.lines().filter_map(|line| parser.parse_line_with_context(line)).collect();
         // abc02 nested has no matching parent span so is suppressed — only 2 events emitted
         assert_eq!(events.len(), 2);
         // outer span is emitted last (when END is seen)
         let outer_id = events[1].id();
         // abc01 nested: parent_id links to the outer span
-        assert!(
-            matches!(&events[0], Event::Single { name, parent_id, .. } if name == "test_inner" && parent_id == &Some(outer_id))
-        );
+        assert!(matches!(&events[0], Event::Single { name, parent_id, .. } if name == "test_inner" && parent_id == &Some(outer_id)));
         // outer span: top-level, no parent
-        assert!(
-            matches!(&events[1], Event::Span { name, parent_id, .. } if name == "test" && parent_id.is_none())
-        );
+        assert!(matches!(&events[1], Event::Span { name, parent_id, .. } if name == "test" && parent_id.is_none()));
     }
 }

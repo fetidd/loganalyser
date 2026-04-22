@@ -33,9 +33,7 @@ impl TestEnv {
     pub async fn restart(&mut self) {
         self.jh.abort();
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let mut watcher = FileWatcher::new(std::fs::read(&self.config_file_path).unwrap())
-            .await
-            .unwrap();
+        let mut watcher = FileWatcher::new(std::fs::read(&self.config_file_path).unwrap()).await.unwrap();
         self.jh = tokio::spawn(async move {
             watcher.run().await.expect("watcher run failed");
         });
@@ -49,14 +47,10 @@ pub async fn setup(config: &str) -> TestEnv {
     let config_file_path = temp_dir.path().join("test_config.toml");
     let log_file_path = temp_dir.path().join("test.log");
     let db_file_path = temp_dir.path().join("test.db");
-    let config = config
-        .replace("DB_PATH", db_file_path.to_str().unwrap())
-        .replace("LOG_PATH", log_file_path.to_str().unwrap());
+    let config = config.replace("DB_PATH", db_file_path.to_str().unwrap()).replace("LOG_PATH", log_file_path.to_str().unwrap());
     std::fs::write(&config_file_path, &config).unwrap();
     std::fs::write(&log_file_path, "").unwrap();
-    let mut watcher = FileWatcher::new(std::fs::read(&config_file_path).unwrap())
-        .await
-        .unwrap();
+    let mut watcher = FileWatcher::new(std::fs::read(&config_file_path).unwrap()).await.unwrap();
     let jh = tokio::spawn(async move {
         watcher.run().await.expect("watcher run failed");
     });
@@ -68,14 +62,8 @@ pub async fn setup(config: &str) -> TestEnv {
     .await
     .unwrap();
     // Verify both tables are accessible before handing the env to the test.
-    storage
-        .load(Filter::new())
-        .await
-        .expect("events table not ready");
-    storage
-        .load_pending()
-        .await
-        .expect("pending_spans table not ready");
+    storage.load(Filter::new()).await.expect("events table not ready");
+    storage.load_pending().await.expect("pending_spans table not ready");
     TestEnv {
         _temp_dir: temp_dir,
         log_file_path,

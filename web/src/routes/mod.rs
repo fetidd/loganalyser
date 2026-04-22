@@ -41,7 +41,9 @@ pub fn render(state: &AppState, template: &str, page: &str) -> HtmlResult {
 pub struct AppError(minijinja::Error);
 
 impl From<minijinja::Error> for AppError {
-    fn from(e: minijinja::Error) -> Self { AppError(e) }
+    fn from(e: minijinja::Error) -> Self {
+        AppError(e)
+    }
 }
 
 impl IntoResponse for AppError {

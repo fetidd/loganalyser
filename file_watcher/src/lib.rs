@@ -1,6 +1,4 @@
-use std::{
-    collections::HashMap, io::SeekFrom, path::Path, path::PathBuf, sync::Arc, time::Duration,
-};
+use std::{collections::HashMap, io::SeekFrom, path::Path, path::PathBuf, sync::Arc, time::Duration};
 
 use event_storage::{EventStorage, PendingSpanRecord, StorageConfig, make_storage};
 use log_parser::parser::Parser;
@@ -54,12 +52,7 @@ impl FileWatcher {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        let Self {
-            file_parser_map,
-            storage,
-            settings,
-            rx,
-        } = self;
+        let Self { file_parser_map, storage, settings, rx } = self;
         let mut interval = tokio::time::interval(Duration::from_secs(settings.poll_interval_secs));
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         'main: loop {
@@ -95,17 +88,15 @@ impl FileWatcher {
                                 && let pending = parser
                                     .pending_spans()
                                     .into_iter()
-                                    .map(|(span_ref, id, timestamp, data, parent_id, raw_line)| {
-                                        PendingSpanRecord {
-                                            file_path: path_str.clone(),
-                                            parser_name: parser.name().to_string(),
-                                            span_ref,
-                                            id,
-                                            timestamp,
-                                            data,
-                                            parent_id,
-                                            raw_line,
-                                        }
+                                    .map(|(span_ref, id, timestamp, data, parent_id, raw_line)| PendingSpanRecord {
+                                        file_path: path_str.clone(),
+                                        parser_name: parser.name().to_string(),
+                                        span_ref,
+                                        id,
+                                        timestamp,
+                                        data,
+                                        parent_id,
+                                        raw_line,
                                     })
                                     .collect::<Vec<PendingSpanRecord>>()
                                 && !pending.is_empty()
@@ -113,9 +104,7 @@ impl FileWatcher {
                                 let s = Arc::clone(storage);
                                 let fp = path_str.clone();
                                 let pn = parser.name().to_string();
-                                tokio::spawn(shared::async_retry!(
-                                    s.save_pending(&fp, &pn, &pending)
-                                ));
+                                tokio::spawn(shared::async_retry!(s.save_pending(&fp, &pn, &pending)));
                                 parser.clean();
                                 break;
                             }
@@ -137,9 +126,7 @@ impl FileWatcher {
     }
 }
 
-async fn build_file_parser_map(
-    resolved: HashMap<PathBuf, Vec<Parser>>,
-) -> anyhow::Result<FileParserMapping> {
+async fn build_file_parser_map(resolved: HashMap<PathBuf, Vec<Parser>>) -> anyhow::Result<FileParserMapping> {
     let mut map = FileParserMapping::default();
     for (path, path_parsers) in resolved {
         let file_len = get_file_len(&path).await?;
@@ -160,30 +147,15 @@ async fn build_file_parser_map(
 ///
 /// Records whose path or parser name are not present in the map are silently
 /// ignored (they refer to config that has since been removed).
-fn restore_pending_state(
-    file_parser_map: &mut FileParserMapping,
-    pending: Vec<PendingSpanRecord>,
-    saved_cursors: &HashMap<String, u64>,
-) {
+fn restore_pending_state(file_parser_map: &mut FileParserMapping, pending: Vec<PendingSpanRecord>, saved_cursors: &HashMap<String, u64>) {
     for record in pending {
         let path = PathBuf::from(&record.file_path);
-        if let Some(ParserOffsets {
-            parsers,
-            offset: cursor_loc,
-        }) = file_parser_map.get_mut(&path)
-        {
+        if let Some(ParserOffsets { parsers, offset: cursor_loc }) = file_parser_map.get_mut(&path) {
             if let Some(&saved) = saved_cursors.get(&record.file_path) {
                 *cursor_loc = saved.min(*cursor_loc);
             }
             if let Some(p) = parsers.iter_mut().find(|p| p.name() == record.parser_name) {
-                p.restore_pending(vec![(
-                    record.span_ref,
-                    record.id,
-                    record.timestamp,
-                    record.data,
-                    record.parent_id,
-                    record.raw_line,
-                )]);
+                p.restore_pending(vec![(record.span_ref, record.id, record.timestamp, record.data, record.parent_id, record.raw_line)]);
             }
         }
     }
@@ -205,9 +177,7 @@ struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self {
-            poll_interval_secs: 3,
-        }
+        Self { poll_interval_secs: 3 }
     }
 }
 
@@ -241,12 +211,7 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap().replace('\\', "/");
         let config = config.replace("__GLOB__", &path);
-        Parser::from_config_file(config.as_bytes())
-            .unwrap()
-            .into_values()
-            .flatten()
-            .next()
-            .unwrap()
+        Parser::from_config_file(config.as_bytes()).unwrap().into_values().flatten().next().unwrap()
     }
 
     fn single_parser(name: &str) -> Parser {
@@ -299,8 +264,7 @@ reference_fields = ["ref"]
             parser_name: parser_name.to_string(),
             span_ref: vec![span_ref.to_string()],
             id: Uuid::new_v4(),
-            timestamp: NaiveDateTime::parse_from_str("2026-01-01 12:00:00", "%Y-%m-%d %H:%M:%S")
-                .unwrap(),
+            timestamp: NaiveDateTime::parse_from_str("2026-01-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap(),
             data: HashMap::from([("ref".to_string(), span_ref.to_string())]),
             parent_id: None,
             raw_line: None,
@@ -323,14 +287,9 @@ reference_fields = ["ref"]
         let path = dir.path().join("test.log");
         std::fs::write(&path, "hello world\n").unwrap(); // 12 bytes
 
-        let map = build_file_parser_map(path_map(&path, vec![single_parser("p1")]))
-            .await
-            .unwrap();
+        let map = build_file_parser_map(path_map(&path, vec![single_parser("p1")])).await.unwrap();
 
-        let ParserOffsets {
-            parsers,
-            offset: cursor,
-        } = &map[&path];
+        let ParserOffsets { parsers, offset: cursor } = &map[&path];
         assert_eq!(parsers.len(), 1);
         assert_eq!(parsers[0].name(), "p1");
         assert_eq!(*cursor, 12);
@@ -342,9 +301,7 @@ reference_fields = ["ref"]
         let path = dir.path().join("test.log");
         std::fs::write(&path, "abc").unwrap(); // 3 bytes
 
-        let map = build_file_parser_map(path_map(&path, vec![single_parser("p1")]))
-            .await
-            .unwrap();
+        let map = build_file_parser_map(path_map(&path, vec![single_parser("p1")])).await.unwrap();
 
         assert_eq!(map[&path].offset, 3);
     }
@@ -357,10 +314,7 @@ reference_fields = ["ref"]
         std::fs::write(&path_a, "aa").unwrap(); // 2 bytes
         std::fs::write(&path_b, "bbbb").unwrap(); // 4 bytes
 
-        let resolved = HashMap::from([
-            (path_a.clone(), vec![single_parser("p1")]),
-            (path_b.clone(), vec![single_parser("p2")]),
-        ]);
+        let resolved = HashMap::from([(path_a.clone(), vec![single_parser("p1")]), (path_b.clone(), vec![single_parser("p2")])]);
 
         let map = build_file_parser_map(resolved).await.unwrap();
 
@@ -411,11 +365,7 @@ reference_fields = ["ref"]
         let path = "/logs/test.log";
         let mut map = map_with_span_parser(path, "sp", 75);
 
-        restore_pending_state(
-            &mut map,
-            vec![pending_record(path, "sp", "ABC")],
-            &HashMap::new(),
-        );
+        restore_pending_state(&mut map, vec![pending_record(path, "sp", "ABC")], &HashMap::new());
 
         assert_eq!(map[&PathBuf::from(path)].offset, 75);
     }
@@ -425,16 +375,9 @@ reference_fields = ["ref"]
         let path = "/logs/test.log";
         let mut map = map_with_span_parser(path, "sp", 0);
 
-        restore_pending_state(
-            &mut map,
-            vec![pending_record(path, "sp", "ABC")],
-            &HashMap::new(),
-        );
+        restore_pending_state(&mut map, vec![pending_record(path, "sp", "ABC")], &HashMap::new());
 
-        assert_eq!(
-            map[&PathBuf::from(path)].parsers[0].pending_spans().len(),
-            1
-        );
+        assert_eq!(map[&PathBuf::from(path)].parsers[0].pending_spans().len(), 1);
     }
 
     #[test]
@@ -442,17 +385,10 @@ reference_fields = ["ref"]
         let path = "/logs/test.log";
         let mut map = map_with_span_parser(path, "sp", 50);
 
-        restore_pending_state(
-            &mut map,
-            vec![pending_record("/logs/other.log", "sp", "ABC")],
-            &HashMap::new(),
-        );
+        restore_pending_state(&mut map, vec![pending_record("/logs/other.log", "sp", "ABC")], &HashMap::new());
 
         assert_eq!(map.len(), 1);
-        assert_eq!(
-            map[&PathBuf::from(path)].parsers[0].pending_spans().len(),
-            0
-        );
+        assert_eq!(map[&PathBuf::from(path)].parsers[0].pending_spans().len(), 0);
         assert_eq!(map[&PathBuf::from(path)].offset, 50); // cursor untouched
     }
 
@@ -461,34 +397,21 @@ reference_fields = ["ref"]
         let path = "/logs/test.log";
         let mut map = map_with_span_parser(path, "sp", 0);
 
-        restore_pending_state(
-            &mut map,
-            vec![pending_record(path, "does_not_exist", "ABC")],
-            &HashMap::new(),
-        );
+        restore_pending_state(&mut map, vec![pending_record(path, "does_not_exist", "ABC")], &HashMap::new());
 
-        assert_eq!(
-            map[&PathBuf::from(path)].parsers[0].pending_spans().len(),
-            0
-        );
+        assert_eq!(map[&PathBuf::from(path)].parsers[0].pending_spans().len(), 0);
     }
 
     #[test]
     fn restore_multiple_records_restores_all_spans_and_rewinds_cursor_once() {
         let path = "/logs/test.log";
         let mut map = map_with_span_parser(path, "sp", 100);
-        let records = vec![
-            pending_record(path, "sp", "ABC"),
-            pending_record(path, "sp", "DEF"),
-        ];
+        let records = vec![pending_record(path, "sp", "ABC"), pending_record(path, "sp", "DEF")];
         let saved = HashMap::from([(path.to_string(), 40u64)]);
 
         restore_pending_state(&mut map, records, &saved);
 
-        let ParserOffsets {
-            parsers,
-            offset: cursor,
-        } = &map[&PathBuf::from(path)];
+        let ParserOffsets { parsers, offset: cursor } = &map[&PathBuf::from(path)];
         assert_eq!(parsers[0].pending_spans().len(), 2);
         assert_eq!(*cursor, 40);
     }
@@ -499,20 +422,8 @@ reference_fields = ["ref"]
         let path_a = "/logs/a.log";
         let path_b = "/logs/b.log";
         let mut map = FileParserMapping::default();
-        map.insert(
-            PathBuf::from(path_a),
-            ParserOffsets {
-                parsers: vec![span_parser("sp")],
-                offset: 100,
-            },
-        );
-        map.insert(
-            PathBuf::from(path_b),
-            ParserOffsets {
-                parsers: vec![span_parser("sp")],
-                offset: 200,
-            },
-        );
+        map.insert(PathBuf::from(path_a), ParserOffsets { parsers: vec![span_parser("sp")], offset: 100 });
+        map.insert(PathBuf::from(path_b), ParserOffsets { parsers: vec![span_parser("sp")], offset: 200 });
         let saved = HashMap::from([(path_a.to_string(), 10u64), (path_b.to_string(), 20u64)]);
 
         restore_pending_state(&mut map, vec![pending_record(path_a, "sp", "ABC")], &saved);

@@ -98,10 +98,7 @@ impl Dialect for SqliteDialect {
     }
 
     fn json_condition(&mut self, field: &str, op: &str, val: String) -> (String, Vec<ParamValue>) {
-        (
-            format!("json_extract(data, '$.{field}') {op} ?"),
-            vec![val.into()],
-        )
+        (format!("json_extract(data, '$.{field}') {op} ?"), vec![val.into()])
     }
 }
 
@@ -135,9 +132,7 @@ impl EventStorage for SqliteEventStore {
 
     async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
-        let query = format!(
-            "SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",
-        );
+        let query = format!("SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",);
         let mut query = sqlx::query(&query);
         for b in bindings {
             query = match b {
@@ -149,42 +144,22 @@ impl EventStorage for SqliteEventStore {
 
         let mut events = Vec::with_capacity(rows.len());
         for row in rows {
-            let id: Uuid = row
-                .try_get::<String, _>("id")
-                .and_then(|s| Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e))))?;
+            let id: Uuid = row.try_get::<String, _>("id").and_then(|s| Uuid::parse_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e))))?;
             let event_type: String = row.try_get("event_type")?;
             let name: String = row.try_get("name")?;
-            let timestamp = row.try_get::<String, _>("timestamp").and_then(|s| {
-                chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f")
-                    .map_err(|e| sqlx::Error::Decode(Box::new(e)))
-            })?;
+            let timestamp = row
+                .try_get::<String, _>("timestamp")
+                .and_then(|s| chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f").map_err(|e| sqlx::Error::Decode(Box::new(e))))?;
             let data_json: String = row.try_get("data")?;
-            let parent_id: Option<Uuid> = row
-                .try_get::<Option<String>, _>("parent_id")?
-                .map(|s| Uuid::parse_str(&s))
-                .transpose()?;
+            let parent_id: Option<Uuid> = row.try_get::<Option<String>, _>("parent_id")?.map(|s| Uuid::parse_str(&s)).transpose()?;
             let duration_ms: Option<i64> = row.try_get("duration_ms")?;
             let raw_line: Option<String> = row.try_get("raw_line")?;
-            events.push(build_event(
-                id,
-                event_type,
-                name,
-                timestamp,
-                data_json,
-                parent_id,
-                duration_ms,
-                raw_line,
-            )?);
+            events.push(build_event(id, event_type, name, timestamp, data_json, parent_id, duration_ms, raw_line)?);
         }
         Ok(events)
     }
 
-    async fn save_pending(
-        &self,
-        file_path: &str,
-        parser_name: &str,
-        records: &[PendingSpanRecord],
-    ) -> Result<()> {
+    async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM pending_spans WHERE file_path = ? AND parser_name = ?")
             .bind(file_path)
@@ -225,9 +200,7 @@ impl EventStorage for SqliteEventStore {
     }
 
     async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
-        let rows = sqlx::query("SELECT file_path, cursor FROM file_cursors")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query("SELECT file_path, cursor FROM file_cursors").fetch_all(&self.pool).await?;
         let mut map = HashMap::with_capacity(rows.len());
         for row in rows {
             let path: String = row.try_get("file_path")?;
@@ -238,27 +211,18 @@ impl EventStorage for SqliteEventStore {
     }
 
     async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
-        let rows = sqlx::query(
-            "SELECT file_path, parser_name, span_ref, id, timestamp, data, parent_id, raw_line FROM pending_spans",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query("SELECT file_path, parser_name, span_ref, id, timestamp, data, parent_id, raw_line FROM pending_spans")
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
             let file_path: String = row.try_get("file_path")?;
             let parser_name: String = row.try_get("parser_name")?;
-            let span_ref: Vec<String> =
-                serde_json::from_str(&row.try_get::<String, _>("span_ref")?)?;
-            let id = Uuid::parse_str(&row.try_get::<String, _>("id")?)
-                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-            let timestamp = NaiveDateTime::parse_from_str(
-                &row.try_get::<String, _>("timestamp")?,
-                "%Y-%m-%d %H:%M:%S%.f",
-            )
-            .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
-            let data: HashMap<String, String> =
-                serde_json::from_str(&row.try_get::<String, _>("data")?)?;
+            let span_ref: Vec<String> = serde_json::from_str(&row.try_get::<String, _>("span_ref")?)?;
+            let id = Uuid::parse_str(&row.try_get::<String, _>("id")?).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+            let timestamp = NaiveDateTime::parse_from_str(&row.try_get::<String, _>("timestamp")?, "%Y-%m-%d %H:%M:%S%.f").map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+            let data: HashMap<String, String> = serde_json::from_str(&row.try_get::<String, _>("data")?)?;
             let parent_id: Option<Uuid> = row
                 .try_get::<Option<String>, _>("parent_id")?
                 .map(|s| Uuid::parse_str(&s))

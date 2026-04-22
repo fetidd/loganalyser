@@ -32,12 +32,7 @@ impl Event {
         }
     }
 
-    pub fn new_single(
-        name: &str,
-        timestamp: NaiveDateTime,
-        data: HashMap<String, String>,
-        raw_line: Option<String>,
-    ) -> Event {
+    pub fn new_single(name: &str, timestamp: NaiveDateTime, data: HashMap<String, String>, raw_line: Option<String>) -> Event {
         Event::Single {
             id: Uuid::new_v4(),
             name: name.into(),
@@ -48,13 +43,7 @@ impl Event {
         }
     }
 
-    pub fn new_span(
-        name: &str,
-        timestamp: NaiveDateTime,
-        data: HashMap<String, String>,
-        duration: Duration,
-        raw_lines: Option<(String, String)>,
-    ) -> Event {
+    pub fn new_span(name: &str, timestamp: NaiveDateTime, data: HashMap<String, String>, duration: Duration, raw_lines: Option<(String, String)>) -> Event {
         Event::Span {
             id: Uuid::new_v4(),
             name: name.into(),
@@ -140,14 +129,7 @@ mod tests {
         let timestamp = ts();
         let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
         let event = Event::new_single("my_parser", timestamp, data.clone(), None);
-        let Event::Single {
-            id,
-            name,
-            timestamp: actual_ts,
-            data: actual_data,
-            ..
-        } = event
-        else {
+        let Event::Single { id, name, timestamp: actual_ts, data: actual_data, .. } = event else {
             panic!("expected Single variant");
         };
         assert_eq!(name, "my_parser");

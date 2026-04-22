@@ -40,6 +40,7 @@ pub enum Predicate {
     ParentId(Cmp<String>),
     Duration(Cmp<i64>),
     Name(Cmp<String>),
+    RawLine(Cmp<String>),
 }
 
 pub fn id(c: Cmp<impl Into<String>>) -> Expr {
@@ -127,6 +128,10 @@ impl Filter {
     pub fn with_name(self, cmp: Cmp<impl Into<String>>) -> Self {
         self.and_condition(Predicate::Name(cmp.map(Into::into)))
     }
+
+    pub fn with_raw_line(self, cmp: Cmp<impl Into<String>>) -> Self {
+        self.and_condition(Predicate::RawLine(cmp.map(Into::into)))
+    }
 }
 
 impl From<Expr> for Filter {
@@ -142,9 +147,7 @@ mod tests {
     use rstest::rstest;
 
     fn pred(expr: Expr) -> Predicate {
-        let Expr::Condition(p) = expr else {
-            panic!("expected Condition, got {expr:?}")
-        };
+        let Expr::Condition(p) = expr else { panic!("expected Condition, got {expr:?}") };
         p
     }
 
@@ -166,9 +169,7 @@ mod tests {
     #[test]
     fn test_data_free_fn_wraps_in_json() {
         let expr = data("status", Eq("200"));
-        let Predicate::Data(Cmp::Json(field, inner)) = pred(expr) else {
-            panic!("expected Data(Json(…))")
-        };
+        let Predicate::Data(Cmp::Json(field, inner)) = pred(expr) else { panic!("expected Data(Json(…))") };
         assert_eq!(field, "status");
         assert_eq!(*inner, Eq("200".into()));
     }
@@ -180,47 +181,31 @@ mod tests {
     #[case(Filter::new().with_duration(Lte(999)),           Predicate::Duration(Lte(999)))]
     #[case(Filter::new().with_parent_id(Eq("pid")),        Predicate::ParentId(Eq("pid".into())))]
     fn test_single_with_value(#[case] f: Filter, #[case] expected: Predicate) {
-        let Some(Expr::Condition(p)) = f.expr() else {
-            panic!("expected Condition")
-        };
+        let Some(Expr::Condition(p)) = f.expr() else { panic!("expected Condition") };
         assert_eq!(*p, expected);
     }
 
     #[test]
     fn test_with_data_wraps_in_json() {
         let f = Filter::new().with_data("status", Eq("200"));
-        let Some(Expr::Condition(Predicate::Data(Cmp::Json(field, inner)))) = f.expr() else {
-            panic!("expected Data(Json(…))")
-        };
+        let Some(Expr::Condition(Predicate::Data(Cmp::Json(field, inner)))) = f.expr() else { panic!("expected Data(Json(…))") };
         assert_eq!(field, "status");
         assert_eq!(**inner, Eq("200".into()));
     }
 
     #[test]
     fn test_two_withs_accumulate_as_flat_and() {
-        let f = Filter::new()
-            .with_id(Eq("abc"))
-            .with_timestamp(Gt("2025-01-01"));
-        let Some(Expr::And(exprs)) = f.expr() else {
-            panic!("expected And")
-        };
+        let f = Filter::new().with_id(Eq("abc")).with_timestamp(Gt("2025-01-01"));
+        let Some(Expr::And(exprs)) = f.expr() else { panic!("expected And") };
         assert_eq!(exprs.len(), 2);
         assert_eq!(exprs[0], Expr::Condition(Predicate::Id(Eq("abc".into()))));
-        assert_eq!(
-            exprs[1],
-            Expr::Condition(Predicate::Timestamp(Gt("2025-01-01".into())))
-        );
+        assert_eq!(exprs[1], Expr::Condition(Predicate::Timestamp(Gt("2025-01-01".into()))));
     }
 
     #[test]
     fn test_three_withs_remain_flat() {
-        let f = Filter::new()
-            .with_id(Eq("abc"))
-            .with_timestamp(Gt("2025-01-01"))
-            .with_duration(Lt(1000));
-        let Some(Expr::And(exprs)) = f.expr() else {
-            panic!("expected And")
-        };
+        let f = Filter::new().with_id(Eq("abc")).with_timestamp(Gt("2025-01-01")).with_duration(Lt(1000));
+        let Some(Expr::And(exprs)) = f.expr() else { panic!("expected And") };
         assert_eq!(exprs.len(), 3);
         assert_eq!(exprs[2], Expr::Condition(Predicate::Duration(Lt(1000))));
     }
@@ -228,24 +213,17 @@ mod tests {
     #[test]
     fn test_filter_from_expr_preserves_value() {
         let f: Filter = id(Eq("abc")).into();
-        let Some(Expr::Condition(p)) = f.expr() else {
-            panic!()
-        };
+        let Some(Expr::Condition(p)) = f.expr() else { panic!() };
         assert_eq!(*p, Predicate::Id(Eq("abc".into())));
     }
 
     #[test]
     fn test_filter_from_or_preserves_children() {
         let f: Filter = or([id(Eq("a")), timestamp(Gt("2025-01-01"))]).into();
-        let Some(Expr::Or(exprs)) = f.expr() else {
-            panic!("expected Or")
-        };
+        let Some(Expr::Or(exprs)) = f.expr() else { panic!("expected Or") };
         assert_eq!(exprs.len(), 2);
         assert_eq!(exprs[0], Expr::Condition(Predicate::Id(Eq("a".into()))));
-        assert_eq!(
-            exprs[1],
-            Expr::Condition(Predicate::Timestamp(Gt("2025-01-01".into())))
-        );
+        assert_eq!(exprs[1], Expr::Condition(Predicate::Timestamp(Gt("2025-01-01".into()))));
     }
 
     #[test]
@@ -257,29 +235,19 @@ mod tests {
 
     #[test]
     fn test_and_free_fn_children() {
-        let Expr::And(exprs) = and([id(Eq("a")), timestamp(Gt("b")), duration(Lt(100))]) else {
-            panic!("expected And")
-        };
+        let Expr::And(exprs) = and([id(Eq("a")), timestamp(Gt("b")), duration(Lt(100))]) else { panic!("expected And") };
         assert_eq!(exprs.len(), 3);
         assert_eq!(exprs[0], Expr::Condition(Predicate::Id(Eq("a".into()))));
-        assert_eq!(
-            exprs[1],
-            Expr::Condition(Predicate::Timestamp(Gt("b".into())))
-        );
+        assert_eq!(exprs[1], Expr::Condition(Predicate::Timestamp(Gt("b".into()))));
         assert_eq!(exprs[2], Expr::Condition(Predicate::Duration(Lt(100))));
     }
 
     #[test]
     fn test_or_free_fn_children() {
-        let Expr::Or(exprs) = or([id(Eq("a")), name(Like("%b%"))]) else {
-            panic!("expected Or")
-        };
+        let Expr::Or(exprs) = or([id(Eq("a")), name(Like("%b%"))]) else { panic!("expected Or") };
         assert_eq!(exprs.len(), 2);
         assert_eq!(exprs[0], Expr::Condition(Predicate::Id(Eq("a".into()))));
-        assert_eq!(
-            exprs[1],
-            Expr::Condition(Predicate::Name(Like("%b%".into())))
-        );
+        assert_eq!(exprs[1], Expr::Condition(Predicate::Name(Like("%b%".into()))));
     }
 
     // ── Cmp::map ─────────────────────────────────────────────────────────────
@@ -297,18 +265,12 @@ mod tests {
 
     #[test]
     fn test_cmp_map_in() {
-        assert_eq!(
-            In(vec!["a", "b"]).map(|s: &str| s.to_uppercase()),
-            In(vec!["A".to_string(), "B".to_string()])
-        );
+        assert_eq!(In(vec!["a", "b"]).map(|s: &str| s.to_uppercase()), In(vec!["A".to_string(), "B".to_string()]));
     }
 
     #[test]
     fn test_cmp_map_json_maps_inner_preserves_key() {
         let cmp: Cmp<&str> = Json("field".into(), Box::new(Eq("value")));
-        assert_eq!(
-            cmp.map(|s: &str| s.to_uppercase()),
-            Json("field".into(), Box::new(Eq("VALUE".to_string())))
-        );
+        assert_eq!(cmp.map(|s: &str| s.to_uppercase()), Json("field".into(), Box::new(Eq("VALUE".to_string()))));
     }
 }

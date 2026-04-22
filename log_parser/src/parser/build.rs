@@ -89,9 +89,7 @@ impl Parser {
 
         let mut parsers: HashMap<PathBuf, Vec<Parser>> = HashMap::new();
         for raw in &config.parsers {
-            let glob_pattern = raw
-                .glob()
-                .ok_or_else(|| error("top-level parser missing 'glob'"))?;
+            let glob_pattern = raw.glob().ok_or_else(|| error("top-level parser missing 'glob'"))?;
             let ts_fmt = raw
                 .timestamp_format()
                 .or(config.defaults.timestamp_format.as_deref())
@@ -134,9 +132,7 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
     let mut ref_fields: Vec<String> = ctx.inherited_ref_fields.to_vec();
     for field in &c.reference_fields {
         if ref_fields.contains(field) {
-            return Err(error(&format!(
-                "reference field '{field}' duplicates an inherited field"
-            )));
+            return Err(error(&format!("reference field '{field}' duplicates an inherited field")));
         }
         ref_fields.push(field.clone());
     }
@@ -155,9 +151,7 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
         .map(|n| {
             if let RawParserConfig::Span(ns) = n {
                 if ns.reference_fields.is_empty() {
-                    return Err(error(
-                        "nested span parsers must provide reference_fields to disambiguate from parent",
-                    ));
+                    return Err(error("nested span parsers must provide reference_fields to disambiguate from parent"));
                 }
             }
             let ts_fmt = n.timestamp_format().unwrap_or(ctx.timestamp_format);
@@ -169,15 +163,7 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
             build_parser(n, &nested_ctx)
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Parser::Span(InternalSpanParser::new(
-        c.common.name.clone(),
-        ctx.timestamp_format.to_string(),
-        start,
-        end,
-        nested,
-        ref_fields,
-        c.common.include_raw,
-    )))
+    Ok(Parser::Span(InternalSpanParser::new(c.common.name.clone(), ctx.timestamp_format.to_string(), start, end, nested, ref_fields, c.common.include_raw)))
 }
 
 fn compile_pattern(pattern: &str, components: &HashMap<String, String>) -> Result<Regex> {
@@ -207,13 +193,9 @@ fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Res
         }
         if bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
             let name_start = i + 2;
-            let close = pattern[name_start..]
-                .find('}')
-                .ok_or_else(|| error(&format!("unclosed '${{' at position {i}")))?;
+            let close = pattern[name_start..].find('}').ok_or_else(|| error(&format!("unclosed '${{' at position {i}")))?;
             let name = &pattern[name_start..name_start + close];
-            let value = components
-                .get(name)
-                .ok_or_else(|| error(&format!("missing component: {name}")))?;
+            let value = components.get(name).ok_or_else(|| error(&format!("missing component: {name}")))?;
             result.push_str(&format!("(?:{value})"));
             i = name_start + close + 1;
             continue;
@@ -224,27 +206,14 @@ fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Res
     Ok(result)
 }
 
-fn validate_required_fields(
-    pattern: &Regex,
-    fields: impl IntoIterator<Item: AsRef<str>>,
-) -> Result<()> {
+fn validate_required_fields(pattern: &Regex, fields: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {
     let mut missing = vec![];
     for f in fields {
-        if !pattern
-            .capture_names()
-            .any(|c| c.is_some_and(|c| c == f.as_ref()))
-        {
+        if !pattern.capture_names().any(|c| c.is_some_and(|c| c == f.as_ref())) {
             missing.push(f.as_ref().to_owned());
         }
     }
-    if !missing.is_empty() {
-        Err(error(&format!(
-            "pattern missing fields: {}",
-            missing.join(", ")
-        )))
-    } else {
-        Ok(())
-    }
+    if !missing.is_empty() { Err(error(&format!("pattern missing fields: {}", missing.join(", ")))) } else { Ok(()) }
 }
 
 const WHITESPACE: LazyCell<Regex> = std::cell::LazyCell::new(|| Regex::new(r"\s+").unwrap());
@@ -270,14 +239,9 @@ mod tests {
         build_with_components(toml_str, HashMap::new())
     }
 
-    fn build_with_components(
-        toml_str: &str,
-        components: HashMap<String, String>,
-    ) -> Result<Parser> {
+    fn build_with_components(toml_str: &str, components: HashMap<String, String>) -> Result<Parser> {
         let raw: RawParserConfig = toml::from_str(toml_str).map_err(|e| error(&e.to_string()))?;
-        let ts_fmt = raw
-            .timestamp_format()
-            .ok_or_else(|| error("missing timestamp_format"))?;
+        let ts_fmt = raw.timestamp_format().ok_or_else(|| error("missing timestamp_format"))?;
         let ctx = BuildCtx {
             components: &components,
             timestamp_format: ts_fmt,
@@ -324,21 +288,11 @@ pattern = '(?P<timestamp>${ts})'"#,
         HashMap::from([("ts".to_string(), r"\d+".to_string()), ("unused".to_string(), "x".to_string())]),
         vec!["timestamp"]
     )]
-    fn test_parse_pattern_substitution(
-        #[case] toml_str: &str,
-        #[case] components: HashMap<String, String>,
-        #[case] expected_captures: Vec<&str>,
-    ) {
+    fn test_parse_pattern_substitution(#[case] toml_str: &str, #[case] components: HashMap<String, String>, #[case] expected_captures: Vec<&str>) {
         let parser = build_with_components(toml_str, components).unwrap();
-        let Parser::Single(p) = parser else {
-            panic!("expected Single")
-        };
+        let Parser::Single(p) = parser else { panic!("expected Single") };
         for cap in expected_captures {
-            assert!(
-                p.pattern.capture_names().any(|c| c == Some(cap)),
-                "expected capture group '{cap}' in pattern {}",
-                p.pattern
-            );
+            assert!(p.pattern.capture_names().any(|c| c == Some(cap)), "expected capture group '{cap}' in pattern {}", p.pattern);
         }
     }
 
@@ -359,16 +313,9 @@ pattern = '(?P<timestamp>${unclosed)'"#,
         HashMap::new(),
         "unclosed"
     )]
-    fn test_parse_pattern_expansion_err(
-        #[case] toml_str: &str,
-        #[case] components: HashMap<String, String>,
-        #[case] expected_in_err: &str,
-    ) {
+    fn test_parse_pattern_expansion_err(#[case] toml_str: &str, #[case] components: HashMap<String, String>, #[case] expected_in_err: &str) {
         let err = build_with_components(toml_str, components).unwrap_err();
-        assert!(
-            err.to_string().contains(expected_in_err),
-            "expected error containing {expected_in_err:?}, got: {err}"
-        );
+        assert!(err.to_string().contains(expected_in_err), "expected error containing {expected_in_err:?}, got: {err}");
     }
 
     // ── validate_required_fields ──────────────────────────────────────────────
@@ -387,17 +334,10 @@ pattern = '(?P<timestamp>${unclosed)'"#,
     #[case(r"(?P<level>\w+)", vec!["timestamp"], "timestamp")]
     #[case(r"(?P<other>\w+)", vec!["timestamp", "level"], "timestamp")]
     #[case(r"(\d+)(\w+)", vec!["timestamp"], "timestamp")]
-    fn test_validate_required_fields_err(
-        #[case] pattern: &str,
-        #[case] fields: Vec<&str>,
-        #[case] expected_in_err: &str,
-    ) {
+    fn test_validate_required_fields_err(#[case] pattern: &str, #[case] fields: Vec<&str>, #[case] expected_in_err: &str) {
         let re = Regex::new(pattern).unwrap();
         let err = validate_required_fields(&re, fields).unwrap_err();
-        assert!(
-            err.to_string().contains(expected_in_err),
-            "expected error containing {expected_in_err:?}, got: {err}"
-        );
+        assert!(err.to_string().contains(expected_in_err), "expected error containing {expected_in_err:?}, got: {err}");
     }
 
     // ── build outcomes ────────────────────────────────────────────────────────
@@ -422,19 +362,14 @@ pattern = '(?P<timestamp>${unclosed)'"#,
     #[case(NESTED_SPAN_DUPLICATE_REF_FIELD, "duplicates")]
     fn test_semantic_errors(#[case] toml_str: &str, #[case] expected_in_err: &str) {
         let err = build(toml_str).unwrap_err();
-        assert!(
-            err.to_string().contains(expected_in_err),
-            "expected error containing {expected_in_err:?}, got: {err}"
-        );
+        assert!(err.to_string().contains(expected_in_err), "expected error containing {expected_in_err:?}, got: {err}");
     }
 
     #[test]
     fn test_nested_single_inherits_timestamp_format() {
         let parser = build(SPAN_NESTED_INHERITS_TS_FMT).unwrap();
         let Parser::Span(span) = parser else { panic!() };
-        let Parser::Single(nested) = &span.nested[0] else {
-            panic!()
-        };
+        let Parser::Single(nested) = &span.nested[0] else { panic!() };
         assert_eq!(nested.timestamp_format, "%Y-%m-%d %H:%M:%S");
     }
 
@@ -442,9 +377,7 @@ pattern = '(?P<timestamp>${unclosed)'"#,
     fn test_nested_single_overrides_timestamp_format() {
         let parser = build(SPAN_NESTED_OVERRIDES_TS_FMT).unwrap();
         let Parser::Span(span) = parser else { panic!() };
-        let Parser::Single(nested) = &span.nested[0] else {
-            panic!()
-        };
+        let Parser::Single(nested) = &span.nested[0] else { panic!() };
         assert_eq!(nested.timestamp_format, "%Y");
     }
 

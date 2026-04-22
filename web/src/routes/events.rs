@@ -33,25 +33,14 @@ struct EventRow {
 impl EventRow {
     fn from_event(e: &Event) -> Self {
         match e {
-            Event::Span {
-                id,
-                name,
-                timestamp,
-                duration,
-                ..
-            } => EventRow {
+            Event::Span { id, name, timestamp, duration, .. } => EventRow {
                 id: id.to_string(),
                 kind: "span",
                 name: name.clone(),
                 timestamp: timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
                 duration_ms: Some(duration.num_milliseconds()),
             },
-            Event::Single {
-                id,
-                name,
-                timestamp,
-                ..
-            } => EventRow {
+            Event::Single { id, name, timestamp, .. } => EventRow {
                 id: id.to_string(),
                 kind: "single",
                 name: name.clone(),
@@ -69,17 +58,10 @@ struct FieldEntry {
 }
 
 fn storage_err(e: event_storage::Error) -> AppError {
-    AppError(minijinja::Error::new(
-        minijinja::ErrorKind::InvalidOperation,
-        e.to_string(),
-    ))
+    AppError(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
 }
 
-async fn load_page(
-    state: &AppState,
-    query: &EventsQuery,
-    page: usize,
-) -> Result<(Vec<EventRow>, bool), AppError> {
+async fn load_page(state: &AppState, query: &EventsQuery, page: usize) -> Result<(Vec<EventRow>, bool), AppError> {
     let mut filter = Filter::new();
     if let Some(name) = &query.name {
         let name = name.trim();
@@ -107,20 +89,12 @@ async fn load_page(
 
     let offset = (page - 1) * PAGE_SIZE;
     let has_more = offset + PAGE_SIZE < events.len();
-    let rows = events
-        .iter()
-        .skip(offset)
-        .take(PAGE_SIZE)
-        .map(EventRow::from_event)
-        .collect();
+    let rows = events.iter().skip(offset).take(PAGE_SIZE).map(EventRow::from_event).collect();
     Ok((rows, has_more))
 }
 
 // GET /events
-pub async fn handler(
-    State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
-) -> HtmlResult {
+pub async fn handler(State(state): State<AppState>, Query(query): Query<EventsQuery>) -> HtmlResult {
     let (rows, has_more) = load_page(&state, &query, 1).await?;
     let tmpl = state.env.get_template("events.html")?;
     let html = tmpl.render(context! {
@@ -135,10 +109,7 @@ pub async fn handler(
 }
 
 // GET /events/results — page 1 fragment; used by filter changes
-pub async fn results(
-    State(state): State<AppState>,
-    Query(query): Query<EventsQuery>,
-) -> HtmlResult {
+pub async fn results(State(state): State<AppState>, Query(query): Query<EventsQuery>) -> HtmlResult {
     let (rows, has_more) = load_page(&state, &query, 1).await?;
     let tmpl = state.env.get_template("events_results.html")?;
     let html = tmpl.render(context! {
@@ -176,38 +147,16 @@ pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Ht
     };
 
     let (eid, parent_id, mut fields, raw_line) = match &event {
-        Event::Span {
-            id,
-            parent_id,
-            data,
-            raw_lines,
-            ..
-        } => (
+        Event::Span { id, parent_id, data, raw_lines, .. } => (
             id.to_string(),
             parent_id.map(|p| p.to_string()),
-            data.iter()
-                .map(|(k, v)| FieldEntry {
-                    key: k.clone(),
-                    val: v.clone(),
-                })
-                .collect::<Vec<_>>(),
+            data.iter().map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() }).collect::<Vec<_>>(),
             raw_lines.as_ref().map(|(s1, s2)| format!("{s1} - {s2}")),
         ),
-        Event::Single {
-            id,
-            parent_id,
-            data,
-            raw_line,
-            ..
-        } => (
+        Event::Single { id, parent_id, data, raw_line, .. } => (
             id.to_string(),
             parent_id.map(|p| p.to_string()),
-            data.iter()
-                .map(|(k, v)| FieldEntry {
-                    key: k.clone(),
-                    val: v.clone(),
-                })
-                .collect::<Vec<_>>(),
+            data.iter().map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() }).collect::<Vec<_>>(),
             raw_line.as_ref().map(|s| s.to_string()),
         ),
     };

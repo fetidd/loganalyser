@@ -16,13 +16,7 @@ pub fn default_state_db_path() -> PathBuf {
         let var_lib = PathBuf::from("/var/lib/loganalyser");
         if std::fs::create_dir_all(&var_lib).is_ok() {
             let sentinel = var_lib.join(".write_check");
-            if std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&sentinel)
-                .is_ok()
-            {
+            if std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&sentinel).is_ok() {
                 let _ = std::fs::remove_file(sentinel);
                 return var_lib.join("state.db");
             }
@@ -49,14 +43,9 @@ where
     let mut search_from = 0;
     while let Some(rel_start) = result[search_from..].find("${") {
         let start = search_from + rel_start;
-        let end = result[start..]
-            .find('}')
-            .ok_or(ExpandError::UnclosedBrace { pos: start })?
-            + start;
+        let end = result[start..].find('}').ok_or(ExpandError::UnclosedBrace { pos: start })? + start;
         let var_name = &result[start + 2..end];
-        let value = lookup(var_name).ok_or_else(|| ExpandError::MissingVar {
-            name: var_name.to_string(),
-        })?;
+        let value = lookup(var_name).ok_or_else(|| ExpandError::MissingVar { name: var_name.to_string() })?;
         result.replace_range(start..=end, &value);
         search_from = start + value.len();
     }
@@ -128,12 +117,7 @@ mod tests {
     #[case("ok_${HOST}_then_${NOPE}", "NOPE")]
     fn test_expand_missing_var(#[case] input: &str, #[case] missing_name: &str) {
         let err = expand_map_vars(input, &vars()).unwrap_err();
-        assert_eq!(
-            err,
-            ExpandError::MissingVar {
-                name: missing_name.to_string()
-            }
-        );
+        assert_eq!(err, ExpandError::MissingVar { name: missing_name.to_string() });
     }
 
     #[rstest]
@@ -156,12 +140,7 @@ mod tests {
     fn test_expand_env_vars_missing() {
         temp_env::with_var("TEST_EXPAND_HOST", None::<&str>, || {
             let err = expand_env_vars("connect to ${TEST_EXPAND_HOST}").unwrap_err();
-            assert_eq!(
-                err,
-                ExpandError::MissingVar {
-                    name: "TEST_EXPAND_HOST".to_string()
-                }
-            );
+            assert_eq!(err, ExpandError::MissingVar { name: "TEST_EXPAND_HOST".to_string() });
         });
     }
 }

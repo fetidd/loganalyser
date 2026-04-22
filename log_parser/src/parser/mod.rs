@@ -44,16 +44,7 @@ impl Parser {
         }
     }
 
-    pub fn pending_spans(
-        &self,
-    ) -> Vec<(
-        Vec<String>,
-        Uuid,
-        NaiveDateTime,
-        HashMap<String, String>,
-        Option<Uuid>,
-        Option<String>,
-    )> {
+    pub fn pending_spans(&self) -> Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)> {
         match self {
             Parser::Single(_) => vec![],
             Parser::Span(p) => p.pending_spans(),
@@ -73,17 +64,7 @@ impl Parser {
         }
     }
 
-    pub fn restore_pending(
-        &mut self,
-        spans: Vec<(
-            Vec<String>,
-            Uuid,
-            NaiveDateTime,
-            HashMap<String, String>,
-            Option<Uuid>,
-            Option<String>,
-        )>,
-    ) {
+    pub fn restore_pending(&mut self, spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)>) {
         if let Parser::Span(p) = self {
             p.restore_pending(spans);
         }
@@ -94,10 +75,7 @@ pub(super) fn extract_timestamp(ts: &str, timestamp_format: &str) -> Option<chro
     chrono::NaiveDateTime::parse_from_str(ts, timestamp_format).ok()
 }
 
-pub(super) fn extract_data(
-    capture_names: &mut CaptureNames,
-    captures: &Captures,
-) -> HashMap<String, String> {
+pub(super) fn extract_data(capture_names: &mut CaptureNames, captures: &Captures) -> HashMap<String, String> {
     let mut data = HashMap::new();
     for field in capture_names {
         if let Some(field) = field
@@ -120,10 +98,7 @@ pub(crate) mod tests {
 
     use super::*;
 
-    pub(crate) fn common_test_data(
-        data: &[(&str, &str)],
-        timestamp: &str,
-    ) -> (String, HashMap<String, String>) {
+    pub(crate) fn common_test_data(data: &[(&str, &str)], timestamp: &str) -> (String, HashMap<String, String>) {
         let mut data_map = HashMap::from([("timestamp".into(), timestamp.to_string())]);
         for (k, v) in data.iter() {
             data_map.insert(k.to_string(), v.to_string());
@@ -148,11 +123,7 @@ pub(crate) mod tests {
     #[case("2026-01-15", "%Y-%m-%d %H:%M:%S", None)] // date only, format expects time
     #[case("2026-13-01 00:00:00", "%Y-%m-%d %H:%M:%S", None)] // invalid month
     #[case("2026-01-15 08:30:00 extra", "%Y-%m-%d %H:%M:%S", None)] // trailing chars
-    fn test_extract_timestamp(
-        #[case] ts: &str,
-        #[case] fmt: &str,
-        #[case] expected: Option<NaiveDateTime>,
-    ) {
+    fn test_extract_timestamp(#[case] ts: &str, #[case] fmt: &str, #[case] expected: Option<NaiveDateTime>) {
         assert_eq!(extract_timestamp(ts, fmt), expected);
     }
 
@@ -165,19 +136,12 @@ pub(crate) mod tests {
     #[case(r"(\d+) (?P<name>\w+)", "42 alice", vec![("name", "alice")])] // unnamed group excluded
     #[case(r"\d+", "99", vec![])] // no named groups at all
     #[case(r"(?P<prefix>a?)b", "b", vec![("prefix", "")])] // named group captures empty string
-    fn test_extract_data(
-        #[case] pattern: &str,
-        #[case] input: &str,
-        #[case] expected: Vec<(&str, &str)>,
-    ) {
+    fn test_extract_data(#[case] pattern: &str, #[case] input: &str, #[case] expected: Vec<(&str, &str)>) {
         let re = Regex::new(pattern).unwrap();
         let captures = re.captures(input).unwrap();
         let mut capture_names = re.capture_names();
         let actual = extract_data(&mut capture_names, &captures);
-        let expected_map: HashMap<String, String> = expected
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .collect();
+        let expected_map: HashMap<String, String> = expected.into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
         assert_eq!(actual, expected_map);
     }
 }

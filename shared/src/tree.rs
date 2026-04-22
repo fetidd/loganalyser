@@ -8,15 +8,7 @@ pub struct EventNode {
 }
 
 pub fn build_tree(events: Vec<Event>) -> Vec<EventNode> {
-    let mut node_map: HashMap<String, EventNode> = events
-        .iter()
-        .map(|e| {
-            (
-                e.id().to_string(),
-                EventNode { event: e.clone(), children: vec![] },
-            )
-        })
-        .collect();
+    let mut node_map: HashMap<String, EventNode> = events.iter().map(|e| (e.id().to_string(), EventNode { event: e.clone(), children: vec![] })).collect();
 
     let mut child_map: HashMap<String, Vec<String>> = HashMap::new();
     let mut roots: Vec<String> = vec![];
@@ -29,23 +21,13 @@ pub fn build_tree(events: Vec<Event>) -> Vec<EventNode> {
         }
     }
 
-    roots
-        .iter()
-        .map(|id| attach_children(id, &mut node_map, &child_map))
-        .collect()
+    roots.iter().map(|id| attach_children(id, &mut node_map, &child_map)).collect()
 }
 
-fn attach_children(
-    id: &str,
-    map: &mut HashMap<String, EventNode>,
-    child_map: &HashMap<String, Vec<String>>,
-) -> EventNode {
+fn attach_children(id: &str, map: &mut HashMap<String, EventNode>, child_map: &HashMap<String, Vec<String>>) -> EventNode {
     let mut node = map.remove(id).expect("event id missing from map");
     if let Some(children) = child_map.get(id) {
-        node.children = children
-            .iter()
-            .map(|cid| attach_children(cid, map, child_map))
-            .collect();
+        node.children = children.iter().map(|cid| attach_children(cid, map, child_map)).collect();
     }
     node
 }

@@ -28,9 +28,7 @@ macro_rules! async_retry {
                 match ($expr).await {
                     ::std::result::Result::Ok(_) => return,
                     ::std::result::Result::Err(e) if attempt < max => {
-                        ::tracing::warn!(
-                            "attempt {attempt}/{max} failed: {e}, retrying in {delay:?}"
-                        );
+                        ::tracing::warn!("attempt {attempt}/{max} failed: {e}, retrying in {delay:?}");
                         ::tokio::time::sleep(delay).await;
                         delay *= 2;
                     }
@@ -48,10 +46,7 @@ macro_rules! async_retry {
 pub fn datetime_from(ts: &str) -> Result<NaiveDateTime, ParseError> {
     if ts.len() == 10 {
         let d = NaiveDate::parse_from_str(ts, "%Y-%m-%d")?;
-        Ok(NaiveDateTime::new(
-            d,
-            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
-        ))
+        Ok(NaiveDateTime::new(d, NaiveTime::from_hms_opt(0, 0, 0).unwrap()))
     } else {
         NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S")
     }

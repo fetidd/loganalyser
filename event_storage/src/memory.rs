@@ -15,11 +15,7 @@ impl SqliteEventStore {
             .min_connections(1)
             .idle_timeout(None)
             .max_lifetime(None)
-            .connect_with(
-                SqliteConnectOptions::from_str(":memory:")
-                    .expect("valid :memory: connection string")
-                    .create_if_missing(true),
-            )
+            .connect_with(SqliteConnectOptions::from_str(":memory:").expect("valid :memory: connection string").create_if_missing(true))
             .await
             .expect("failed to open in-memory SQLite");
         SqliteEventStore::from_pool(pool).await
