@@ -43,6 +43,8 @@ macro_rules! async_retry {
     };
 }
 
+/// Converts a string of a timestamp to a chrono::NaiveDateTime.
+/// Either yyyy-mm-dd or yyyy-mm-dd hh:mm:ss.
 pub fn datetime_from(ts: &str) -> Result<NaiveDateTime, ParseError> {
     if ts.len() == 10 {
         let d = NaiveDate::parse_from_str(ts, "%Y-%m-%d")?;

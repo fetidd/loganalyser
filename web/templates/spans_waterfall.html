@@ -1,0 +1,366 @@
+{% if error %}
+<div class="wf-error">⚠ {{ error }}</div>
+{% elif rows | length == 0 %}
+<div class="placeholder">
+  <div class="ph-icon">◈</div>
+  <p>No spans found.</p>
+</div>
+{% else %}
+
+<div class="wf-wrap">
+
+  <div class="wf-chart" id="wf-chart">
+
+    <!-- time axis -->
+    <div class="wf-axis">
+      <div class="wf-axis-label-col"></div>
+      <div class="wf-axis-track">
+        {% for t in ticks %}
+        <span class="wf-tick" style="left:{{ t.pct }}%">{{ t.label }}</span>
+        {% endfor %}
+        {% for t in ticks %}
+        <div class="wf-gridline" style="left:{{ t.pct }}%"></div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- rows -->
+    {% for row in rows %}
+    <div class="wf-row {% if row.kind == 'span' %}wf-row-span{% else %}wf-row-single{% endif %}"
+         data-row-id="{{ row.id }}"
+         onclick="wfSelect(this)">
+      <div class="wf-label" style="padding-left:{{ row.depth * 16 + 10 }}px">
+        <span class="wf-kind-dot wf-kind-{{ row.kind }}"
+              style="{% if row.kind == 'span' %}background:hsl({{ row.hue }},60%,45%){% endif %}"></span>
+        <span class="wf-name" title="{{ row.name }}">{{ row.name }}</span>
+        {% if row.duration_label %}
+        <span class="wf-dur">{{ row.duration_label }}</span>
+        {% endif %}
+        {% if row.child_count > 0 %}
+        <span class="wf-children">+{{ row.child_count }}</span>
+        {% endif %}
+      </div>
+      <div class="wf-track">
+        {% if row.kind == "span" %}
+        <div class="wf-bar"
+             style="left:{{ row.left_pct }}%;width:{{ row.width_pct }}%;background:hsl({{ row.hue }},60%,42%)">
+        </div>
+        {% else %}
+        <div class="wf-dot"
+             style="left:{{ row.left_pct }}%">
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+
+  </div>
+
+  <!-- detail panel -->
+  <div id="wf-detail" class="wf-detail" hidden>
+    <div class="wf-detail-header">
+      <span id="wf-detail-title" class="wf-detail-title"></span>
+      <button class="wf-detail-close" onclick="wfDeselect()">✕</button>
+    </div>
+    <div id="wf-detail-body" class="wf-detail-body"></div>
+  </div>
+
+</div>
+
+<!-- hidden data store -->
+<div id="wf-data" hidden>
+  {% for row in rows %}
+  <div id="wfd-{{ row.id }}"
+       data-id="{{ row.id }}"
+       data-name="{{ row.name }}"
+       data-kind="{{ row.kind }}"
+       data-ts="{{ row.timestamp }}"
+       data-dur="{{ row.duration_label }}"
+       data-parent="{{ row.parent_id | default('') }}">
+    {% for f in row.fields %}
+    <span data-k="{{ f.key }}" data-v="{{ f.val }}"></span>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+<style>
+  .wf-error {
+    margin: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(224, 92, 107, 0.1);
+    border: 1px solid rgba(224, 92, 107, 0.4);
+    border-radius: 6px;
+    color: var(--danger);
+    font-size: 0.85rem;
+  }
+
+  .wf-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .wf-chart {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  /* axis */
+  .wf-axis {
+    display: grid;
+    grid-template-columns: var(--label-w, 240px) 1fr;
+    height: 28px;
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    z-index: 2;
+  }
+
+  .wf-axis-label-col {
+    border-right: 1px solid var(--border);
+  }
+
+  .wf-axis-track {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .wf-tick {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%) translateX(-50%);
+    font-size: 0.68rem;
+    color: var(--muted);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .wf-tick:first-child { transform: translateY(-50%); }
+
+  .wf-gridline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* rows */
+  .wf-row {
+    display: grid;
+    grid-template-columns: var(--label-w, 240px) 1fr;
+    min-height: 30px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .wf-row:hover { background: rgba(255, 255, 255, 0.025); }
+  .wf-row.wf-selected { background: rgba(168, 255, 62, 0.07); }
+
+  .wf-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    padding-right: 0.6rem;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .wf-kind-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .wf-kind-single {
+    background: var(--muted);
+    border-radius: 50%;
+  }
+
+  .wf-name {
+    font-size: 0.82rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .wf-dur {
+    font-size: 0.72rem;
+    color: var(--accent);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .wf-children {
+    font-size: 0.68rem;
+    color: var(--muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* track */
+  .wf-track {
+    position: relative;
+    min-width: 0;
+  }
+
+  .wf-bar {
+    position: absolute;
+    top: 20%;
+    height: 60%;
+    border-radius: 3px;
+    min-width: 3px;
+    opacity: 0.85;
+    transition: opacity 0.1s, filter 0.1s;
+  }
+  .wf-row:hover .wf-bar,
+  .wf-row.wf-selected .wf-bar { opacity: 1; filter: brightness(1.2); }
+
+  .wf-dot {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%) translateX(-50%);
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+    border: 2px solid var(--bg);
+    transition: background 0.1s;
+  }
+  .wf-row:hover .wf-dot,
+  .wf-row.wf-selected .wf-dot { background: var(--text); }
+
+  /* detail panel */
+  .wf-detail {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .wf-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+
+  .wf-detail-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .wf-detail-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0 0.25rem;
+  }
+  .wf-detail-close:hover { color: var(--text); }
+
+  .wf-detail-body {
+    padding: 0.6rem 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    font-size: 0.8rem;
+  }
+
+  .wf-field {
+    display: flex;
+    gap: 0.35rem;
+    align-items: baseline;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.18rem 0.45rem;
+  }
+  .wf-field-key { color: var(--accent); font-weight: 600; }
+  .wf-field-val { color: var(--text); }
+
+  .wf-meta-row {
+    display: flex;
+    gap: 0.35rem;
+    align-items: baseline;
+    color: var(--muted);
+    font-size: 0.75rem;
+    width: 100%;
+    margin-bottom: 0.25rem;
+  }
+  .wf-meta-row span { color: var(--text); }
+</style>
+
+<script>
+  function wfSelect(row) {
+    document.querySelectorAll('.wf-row').forEach(r => r.classList.remove('wf-selected'));
+    row.classList.add('wf-selected');
+
+    const id = row.dataset.rowId;
+    const src = document.getElementById('wfd-' + id);
+    if (!src) return;
+
+    const name = src.dataset.name;
+    const kind = src.dataset.kind;
+    const ts   = src.dataset.ts;
+    const dur  = src.dataset.dur;
+    const pid  = src.dataset.parent;
+
+    document.getElementById('wf-detail-title').textContent = name + ' (' + kind + ')';
+
+    let html = '<div class="wf-meta-row">id: <span>' + id + '</span></div>';
+    html += '<div class="wf-meta-row">timestamp: <span>' + ts + '</span>';
+    if (dur) html += ' &nbsp; duration: <span>' + dur + '</span>';
+    html += '</div>';
+    if (pid) html += '<div class="wf-meta-row">parent: <span>' + pid + ' <a href="#" onclick="loadFromDetail(\'' + pid + '\');return false" style="color:var(--accent)">↑ load</a></span></div>';
+
+    src.querySelectorAll('[data-k]').forEach(el => {
+      html += '<div class="wf-field"><span class="wf-field-key">' +
+        escHtml(el.dataset.k) + '</span><span class="wf-field-val">' +
+        escHtml(el.dataset.v) + '</span></div>';
+    });
+
+    document.getElementById('wf-detail-body').innerHTML = html;
+    document.getElementById('wf-detail').hidden = false;
+  }
+
+  function wfDeselect() {
+    document.querySelectorAll('.wf-row').forEach(r => r.classList.remove('wf-selected'));
+    document.getElementById('wf-detail').hidden = true;
+  }
+
+  function loadFromDetail(id) {
+    const input = document.getElementById('wf-id-input');
+    if (input) input.value = id;
+    htmx.ajax('GET', '/spans/waterfall?id=' + encodeURIComponent(id), {
+      target: '#wf-results',
+      pushURL: true,
+    });
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+
+{% endif %}

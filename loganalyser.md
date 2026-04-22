@@ -24,7 +24,7 @@ Extend the existing `loganalyser` project into a full log exploration tool.
 
 *Querying*
 - [ ] HTTP query API — expose `GET /events` with filter params so other tools can query the store
-- [ ] Full-text search across the raw log line, not just structured fields
+- [x] Full-text search across the raw log line, not just structured fields
 - [ ] Aggregation queries: count events by name/level over a time window, average duration of spans
 - [ ] Time-bucket grouping: "count errors per hour for the last 7 days" as a single query
 

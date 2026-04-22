@@ -24,6 +24,7 @@ pub fn router(state: AppState) -> Router {
         .route("/events/{id}/detail", get(events::detail))
         .route("/tail", get(tail::handler))
         .route("/spans", get(spans::handler))
+        .route("/spans/waterfall", get(spans::waterfall))
         .route("/charts", get(charts::handler))
         .route("/searches", get(searches::handler))
         .with_state(state)

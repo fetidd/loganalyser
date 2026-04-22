@@ -1,15 +1,219 @@
 {% extends "base.html" %}
 {% block title %}Span Waterfall — loganalyser{% endblock %}
 {% block content %}
-<h1>Span Waterfall</h1>
-<p class="subtitle">Child spans for a given parent event ID, rendered as a trace diagram.</p>
 
-<div class="stub">⚙ Not yet implemented</div>
+<div class="spans-layout">
 
-<div class="placeholder">
-  <div class="ph-icon">◈</div>
-  <p>Enter a parent event ID to load its span tree.<br>
-  Each span renders as a horizontal bar scaled to its duration, indented by depth.<br>
-  Hovering a bar shows the full data fields for that span.</p>
+  <div class="spans-header">
+    <h1>Span Waterfall</h1>
+    <p class="subtitle">Select a root span or paste any event ID to visualise its trace.</p>
+
+    <form id="wf-form"
+          hx-get="/spans/waterfall"
+          hx-target="#wf-results"
+          hx-indicator="#wf-spinner"
+          hx-push-url="true"
+          hx-trigger="submit">
+      <div class="filter-bar">
+        <input type="text"
+               name="id"
+               id="wf-id-input"
+               placeholder="event ID…"
+               autocomplete="off"
+               spellcheck="false" />
+        <button type="submit">Load</button>
+        <span id="wf-spinner" class="htmx-indicator spinner">⟳</span>
+      </div>
+    </form>
+  </div>
+
+  <div class="spans-body">
+
+    {% if root_spans | length > 0 %}
+    <div class="picker">
+      <div class="picker-label">Root spans</div>
+      <div class="picker-list">
+        {% for s in root_spans %}
+        <button class="picker-row"
+                onclick="loadSpan('{{ s.id }}')"
+                title="{{ s.id }}">
+          <span class="picker-name">{{ s.name }}</span>
+          <span class="picker-meta">{{ s.timestamp }}</span>
+          <span class="picker-dur">{{ s.duration_label }}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div id="wf-results" class="wf-results-area">
+      <div class="placeholder">
+        <div class="ph-icon">◈</div>
+        <p>Select a root span or enter an ID above.</p>
+      </div>
+    </div>
+
+  </div>
+
 </div>
+
+<script>
+  function loadSpan(id) {
+    document.getElementById('wf-id-input').value = id;
+    htmx.ajax('GET', '/spans/waterfall?id=' + encodeURIComponent(id), {
+      target: '#wf-results',
+      indicator: '#wf-spinner',
+      pushURL: true,
+    });
+  }
+</script>
+
+<style>
+  main {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .spans-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 1rem;
+  }
+
+  .spans-header { padding-bottom: 0.25rem; }
+
+  .spans-body {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 1rem;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ── picker ── */
+  .picker {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .picker-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: 0.55rem 0.75rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .picker-list {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .picker-row {
+    display: grid;
+    grid-template-rows: auto auto;
+    grid-template-columns: 1fr auto;
+    gap: 0.1rem 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s;
+  }
+  .picker-row:last-child { border-bottom: none; }
+  .picker-row:hover { background: rgba(168, 255, 62, 0.06); }
+  .picker-row.active { background: rgba(168, 255, 62, 0.1); color: var(--accent); }
+
+  .picker-name {
+    grid-column: 1;
+    grid-row: 1;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .picker-meta {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  .picker-dur {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 0.75rem;
+    color: var(--accent);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ── results area ── */
+  .wf-results-area {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* ── filter bar (shared) ── */
+  .filter-bar {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+  }
+
+  .filter-bar input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.75rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
+    outline: none;
+  }
+  .filter-bar input[type="text"]:focus { border-color: var(--accent); }
+
+  .filter-bar button {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    padding: 0.45rem 1rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .spinner {
+    display: none;
+    color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  .htmx-request .spinner { display: inline; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
 {% endblock %}
