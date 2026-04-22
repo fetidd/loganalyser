@@ -123,6 +123,7 @@ pub(crate) fn build_event(id: Uuid, event_type: String, name: String, timestamp:
 pub(crate) trait Dialect {
     fn placeholder(&mut self) -> String;
     fn json_condition(&mut self, field: &str, op: &str, val: String) -> (String, Vec<ParamValue>);
+    fn json_in_condition(&mut self, field: &str, vals: &[String]) -> (String, Vec<ParamValue>);
 }
 
 pub(crate) fn build_where(filter: &Filter, dialect: &mut impl Dialect) -> Params {
@@ -151,19 +152,28 @@ fn build_predicate(predicate: &Predicate, params: &mut Params, dialect: &mut imp
         Predicate::Duration(cmp) => build_i64_column("duration_ms", cmp, params, dialect),
         Predicate::Name(cmp) => build_string_column("name", cmp, params, dialect),
         Predicate::RawLine(cmp) => build_string_column("raw_line", cmp, params, dialect),
+        Predicate::Type(cmp) => build_string_column("event_type", cmp, params, dialect),
     }
 }
 
 fn build_data(cmp: &Cmp<String>, params: &mut Params, dialect: &mut impl Dialect) {
     match cmp {
         Cmp::Json(field, inner) => {
-            let (op, val) = match &**inner {
-                Cmp::Eq(s) => ("=", s.clone()),
-                Cmp::Like(s) => ("LIKE", s.clone()),
-                _ => panic!("only = or LIKE supported for data"),
-            };
-            let (sql, binds) = dialect.json_condition(field, op, val);
-            params.add(&sql, &binds);
+            match &**inner {
+                Cmp::In(vals) => {
+                    let (sql, binds) = dialect.json_in_condition(field, vals);
+                    params.add(&sql, &binds);
+                }
+                other => {
+                    let (op, val) = match other {
+                        Cmp::Eq(s) => ("=", s.clone()),
+                        Cmp::Like(s) => ("LIKE", s.clone()),
+                        _ => panic!("not supported for JSON"),
+                    };
+                    let (sql, binds) = dialect.json_condition(field, op, val);
+                    params.add(&sql, &binds);
+                }
+            }
         }
         other => panic!("data can not be filtered by {other:?}"),
     }
@@ -249,4 +259,44 @@ fn build_or(exprs: &[Expr], params: &mut Params, wrap: bool, dialect: &mut impl 
         sql = format!("({sql})");
     }
     params.add(&sql, &binds);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event_filter::Filter;
+
+    struct TestDialect;
+
+    impl Dialect for TestDialect {
+        fn placeholder(&mut self) -> String { "?".into() }
+        fn json_condition(&mut self, field: &str, op: &str, val: String) -> (String, Vec<ParamValue>) {
+            (format!("json_extract(data, '$.{field}') {op} ?"), vec![val.into()])
+        }
+        fn json_in_condition(&mut self, field: &str, vals: &[String]) -> (String, Vec<ParamValue>) {
+            let placeholders = vals.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let binds = vals.iter().map(|v| v.clone().into()).collect();
+            (format!("json_extract(data, '$.{field}') IN ({placeholders})"), binds)
+        }
+    }
+
+    fn where_sql(filter: Filter) -> Params {
+        build_where(&filter, &mut TestDialect)
+    }
+
+    #[test]
+    fn json_eq_generates_correct_sql() {
+        let f = Filter::data("status", Cmp::Eq("ok"));
+        let Params(sql, binds) = where_sql(f);
+        assert_eq!(sql, " WHERE json_extract(data, '$.status') = ?");
+        assert_eq!(binds, vec![ParamValue::String("ok".into())]);
+    }
+
+    #[test]
+    fn json_in_generates_correct_sql() {
+        let f = Filter::data("status", Cmp::In(vec!["ok", "pending"]));
+        let Params(sql, binds) = where_sql(f);
+        assert_eq!(sql, " WHERE json_extract(data, '$.status') IN (?, ?)");
+        assert_eq!(binds, vec![ParamValue::String("ok".into()), ParamValue::String("pending".into())]);
+    }
 }

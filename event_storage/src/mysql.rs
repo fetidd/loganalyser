@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use shared::event::Event;
 use sqlx::Row;
@@ -8,13 +7,13 @@ use uuid::Uuid;
 
 use crate::pending::PendingSpanRecord;
 use crate::sql::{Dialect, EventForInsert, ParamValue, Params, build_event, build_where};
-use crate::{EventStorage, Filter, Result, SqliteEventStore};
+use crate::{Filter, Result, SqliteEventStore};
 
 #[derive(Debug)]
 pub struct MySqlEventStore {
-    pool: sqlx::MySqlPool,
+    pub(crate) pool: sqlx::MySqlPool,
     /// Local SQLite database used to persist pending spans and file cursors.
-    sidecar: SqliteEventStore,
+    pub(crate) sidecar: SqliteEventStore,
 }
 
 impl MySqlEventStore {
@@ -33,17 +32,21 @@ impl Dialect for MySqlDialect {
     fn json_condition(&mut self, field: &str, op: &str, val: String) -> (String, Vec<ParamValue>) {
         (format!("data->>? {op} ?"), vec![format!("$.{field}").into(), val.into()])
     }
+
+    fn json_in_condition(&mut self, field: &str, vals: &[String]) -> (String, Vec<ParamValue>) {
+        let placeholders = vals.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let mut binds: Vec<ParamValue> = vec![format!("$.{field}").into()];
+        binds.extend(vals.iter().map(|v| v.clone().into()));
+        (format!("data->>? IN ({placeholders})"), binds)
+    }
 }
 
 impl MySqlEventStore {
     fn get_where_sql(filter: &Filter) -> Params {
         build_where(filter, &mut MySqlDialect)
     }
-}
 
-#[async_trait]
-impl EventStorage for MySqlEventStore {
-    async fn store(&self, events: &[Event]) -> Result<()> {
+    pub async fn store(&self, events: &[Event]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         for event in events {
             let e = EventForInsert::from_event(event)?;
@@ -63,7 +66,7 @@ impl EventStorage for MySqlEventStore {
         Ok(())
     }
 
-    async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
+    pub async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!("SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",);
         let mut query = sqlx::query(&query);
@@ -90,19 +93,19 @@ impl EventStorage for MySqlEventStore {
         Ok(events)
     }
 
-    async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
+    pub async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
         self.sidecar.save_pending(file_path, parser_name, records).await
     }
 
-    async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
+    pub async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
         self.sidecar.save_cursor(file_path, cursor).await
     }
 
-    async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
+    pub async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
         self.sidecar.load_pending().await
     }
 
-    async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
+    pub async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
         self.sidecar.load_file_cursors().await
     }
 }

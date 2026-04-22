@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use shared::event::Event;
 use sqlx::Row;
@@ -8,7 +7,7 @@ use uuid::Uuid;
 
 use crate::pending::PendingSpanRecord;
 use crate::sql::{Dialect, EventForInsert, ParamValue, Params, build_event, build_where};
-use crate::{EventStorage, Filter, Result};
+use crate::{Filter, Result};
 
 /// SQLite-backed event store.
 ///
@@ -38,7 +37,7 @@ use crate::{EventStorage, Filter, Result};
 /// ```
 #[derive(Debug)]
 pub struct SqliteEventStore {
-    pool: sqlx::SqlitePool,
+    pub(crate) pool: sqlx::SqlitePool,
 }
 
 impl SqliteEventStore {
@@ -100,17 +99,20 @@ impl Dialect for SqliteDialect {
     fn json_condition(&mut self, field: &str, op: &str, val: String) -> (String, Vec<ParamValue>) {
         (format!("json_extract(data, '$.{field}') {op} ?"), vec![val.into()])
     }
+
+    fn json_in_condition(&mut self, field: &str, vals: &[String]) -> (String, Vec<ParamValue>) {
+        let placeholders = vals.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let binds = vals.iter().map(|v| v.clone().into()).collect();
+        (format!("json_extract(data, '$.{field}') IN ({placeholders})"), binds)
+    }
 }
 
 impl SqliteEventStore {
     fn get_where_sql(filter: &Filter) -> Params {
         build_where(filter, &mut SqliteDialect)
     }
-}
 
-#[async_trait]
-impl EventStorage for SqliteEventStore {
-    async fn store(&self, events: &[Event]) -> Result<()> {
+    pub async fn store(&self, events: &[Event]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         for event in events {
             let e = EventForInsert::from_event(event)?;
@@ -130,7 +132,7 @@ impl EventStorage for SqliteEventStore {
         Ok(())
     }
 
-    async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
+    pub async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!("SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",);
         let mut query = sqlx::query(&query);
@@ -159,7 +161,7 @@ impl EventStorage for SqliteEventStore {
         Ok(events)
     }
 
-    async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
+    pub async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM pending_spans WHERE file_path = ? AND parser_name = ?")
             .bind(file_path)
@@ -187,7 +189,7 @@ impl EventStorage for SqliteEventStore {
         Ok(())
     }
 
-    async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
+    pub async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
         sqlx::query(
             "INSERT INTO file_cursors (file_path, cursor) VALUES (?, ?) \
              ON CONFLICT(file_path) DO UPDATE SET cursor = excluded.cursor",
@@ -199,7 +201,7 @@ impl EventStorage for SqliteEventStore {
         Ok(())
     }
 
-    async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
+    pub async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
         let rows = sqlx::query("SELECT file_path, cursor FROM file_cursors").fetch_all(&self.pool).await?;
         let mut map = HashMap::with_capacity(rows.len());
         for row in rows {
@@ -210,7 +212,7 @@ impl EventStorage for SqliteEventStore {
         Ok(map)
     }
 
-    async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
+    pub async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
         let rows = sqlx::query("SELECT file_path, parser_name, span_ref, id, timestamp, data, parent_id, raw_line FROM pending_spans")
             .fetch_all(&self.pool)
             .await?;

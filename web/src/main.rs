@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::Duration;
-use event_storage::{EventStorage, MemoryEventStore};
+use event_storage::EventStorage;
 use minijinja::Environment;
 use shared::event::Event;
 use tower_http::services::ServeDir;
@@ -11,7 +11,7 @@ mod routes;
 #[derive(Clone)]
 pub struct AppState {
     env: Arc<Environment<'static>>,
-    store: Arc<dyn EventStorage>,
+    store: Arc<EventStorage>,
 }
 
 impl AppState {
@@ -29,14 +29,14 @@ impl AppState {
         env.add_template("charts.html", include_str!("../templates/charts.html"))?;
         env.add_template("searches.html", include_str!("../templates/searches.html"))?;
 
-        let store = MemoryEventStore::new_in_memory().await;
+        let store = EventStorage::new_in_memory().await;
         seed_store(&store).await?;
 
         Ok(Self { env: Arc::new(env), store: Arc::new(store) })
     }
 }
 
-async fn seed_store(store: &MemoryEventStore) -> anyhow::Result<()> {
+async fn seed_store(store: &EventStorage) -> anyhow::Result<()> {
     let now = chrono::Utc::now().naive_utc();
     let mut events: Vec<Event> = Vec::new();
 

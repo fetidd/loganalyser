@@ -34,6 +34,7 @@ pub enum Expr {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Predicate {
+    Type(Cmp<String>),
     Data(Cmp<String>),
     Timestamp(Cmp<String>),
     Id(Cmp<String>),
@@ -76,7 +77,7 @@ pub fn or(exprs: impl IntoIterator<Item = Expr>) -> Expr {
     Expr::Or(exprs.into_iter().collect())
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Filter {
     expr: Option<Expr>,
 }
@@ -104,33 +105,70 @@ impl Filter {
         self
     }
 
+    pub fn with_type(self, cmp: Cmp<impl Into<String>>) -> Self {
+        self.and_condition(Predicate::Type(cmp.map(Into::into)))
+    }
+
+    pub fn event_type(cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_type(cmp)
+    }
+
     pub fn with_data(self, field: &str, cmp: Cmp<impl Into<String>>) -> Self {
         let cmp = Cmp::Json(field.into(), Box::new(cmp.map(Into::into)));
         self.and_condition(Predicate::Data(cmp))
+    }
+
+    pub fn data(field: &str, cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_data(field, cmp)
     }
 
     pub fn with_timestamp(self, cmp: Cmp<impl Into<String>>) -> Self {
         self.and_condition(Predicate::Timestamp(cmp.map(Into::into)))
     }
 
+    /// Create a new filter on timestamp with the passed comparator.
+    pub fn timestamp(cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_timestamp(cmp)
+    }
+
     pub fn with_id(self, cmp: Cmp<impl Into<String>>) -> Self {
         self.and_condition(Predicate::Id(cmp.map(Into::into)))
+    }
+
+    pub fn id(cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_id(cmp)
     }
 
     pub fn with_parent_id(self, cmp: Cmp<impl Into<String>>) -> Self {
         self.and_condition(Predicate::ParentId(cmp.map(Into::into)))
     }
 
+    pub fn parent_id(cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_parent_id(cmp)
+    }
+
     pub fn with_duration(self, cmp: Cmp<impl Into<i64>>) -> Self {
         self.and_condition(Predicate::Duration(cmp.map(Into::into)))
+    }
+
+    pub fn duration(cmp: Cmp<impl Into<i64>>) -> Self {
+        Filter::new().with_duration(cmp)
     }
 
     pub fn with_name(self, cmp: Cmp<impl Into<String>>) -> Self {
         self.and_condition(Predicate::Name(cmp.map(Into::into)))
     }
 
+    pub fn name(cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_name(cmp)
+    }
+
     pub fn with_raw_line(self, cmp: Cmp<impl Into<String>>) -> Self {
         self.and_condition(Predicate::RawLine(cmp.map(Into::into)))
+    }
+
+    pub fn raw_line(cmp: Cmp<impl Into<String>>) -> Self {
+        Filter::new().with_raw_line(cmp)
     }
 }
 

@@ -13,7 +13,7 @@ use tracing::warn;
 
 pub struct FileWatcher {
     file_parser_map: FileParserMapping,
-    storage: Arc<dyn EventStorage>,
+    storage: Arc<EventStorage>,
     settings: Settings,
     rx: Option<Receiver<bool>>,
 }
@@ -30,7 +30,7 @@ impl FileWatcher {
     pub async fn new(config_file: Vec<u8>) -> anyhow::Result<Self> {
         let config: Config = toml::from_slice(&config_file)?;
         tracing::debug!("config created: {config:?}");
-        let storage: Arc<dyn EventStorage> = make_storage(&config.storage).await?;
+        let storage = make_storage(&config.storage).await?;
         tracing::debug!("storage created: {storage:?}");
         let built_parsers = Parser::from_config_file(&config_file)?;
         let mut file_parser_map = build_file_parser_map(built_parsers).await?;
@@ -40,7 +40,7 @@ impl FileWatcher {
         tracing::debug!("{file_parser_map:?}");
         Ok(Self {
             file_parser_map,
-            storage,
+            storage: Arc::new(storage),
             settings: config.settings,
             rx: None,
         })

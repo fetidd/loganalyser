@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,14 +7,16 @@ use std::time::Duration;
 
 use event_storage::{Filter, StorageConfig, StorageType, make_storage};
 use file_watcher::FileWatcher;
+use shared::{datetime_from, event::Event};
 use tokio::task::JoinHandle;
 
 pub struct TestEnv {
     _temp_dir: tempfile::TempDir, // kept alive so the directory isn't deleted mid-test
     pub log_file_path: PathBuf,
     config_file_path: PathBuf,
-    pub storage: Arc<dyn event_storage::EventStorage>,
+    pub storage: Arc<event_storage::EventStorage>,
     jh: JoinHandle<()>,
+    seconds: i64,
 }
 
 impl Drop for TestEnv {
@@ -27,6 +31,22 @@ impl TestEnv {
         self.jh.abort();
     }
 
+    /// Polls storage until at least `min` events match `filter`, then returns
+    /// them. Returns `Err` with a description if `timeout` elapses first.
+    pub async fn wait_for(&self, filter: Filter, min: usize, timeout: Duration) -> Result<Vec<Event>, String> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let events = self.storage.load(filter.clone()).await.unwrap();
+            if events.len() >= min {
+                return Ok(events);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!("timed out after {timeout:?}: {} event(s) matched, wanted {min}", events.len()));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     /// Kills the running watcher and starts a fresh one from the same config.
     /// Sleeps briefly after the abort to let cancellation propagate before
     /// the new watcher is initialised (and sets its cursor).
@@ -37,6 +57,19 @@ impl TestEnv {
         self.jh = tokio::spawn(async move {
             watcher.run().await.expect("watcher run failed");
         });
+    }
+
+    pub fn append_log(&mut self, lines: &[&str]) {
+        for line in lines {
+            let line = if line.starts_with("{{ts}}") {
+                let dt = datetime_from("2026-01-01 12:00:00").unwrap().checked_add_signed(chrono::TimeDelta::seconds(self.seconds)).unwrap();
+                self.seconds += 1;
+                format!("{dt}{}", &line[6..])
+            } else {
+                line.to_string()
+            };
+            append(&self.log_file_path, &line);
+        }
     }
 }
 
@@ -68,8 +101,9 @@ pub async fn setup(config: &str) -> TestEnv {
         _temp_dir: temp_dir,
         log_file_path,
         config_file_path,
-        storage,
+        storage: Arc::new(storage),
         jh,
+        seconds: 0,
     }
 }
 

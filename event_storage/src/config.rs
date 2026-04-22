@@ -3,9 +3,7 @@ use serde::Deserialize;
 use shared::env::expand_env_vars;
 use sqlx::{MySqlPool, SqlitePool, sqlite::SqliteConnectOptions};
 use std::path::PathBuf;
-use std::sync::Arc;
-
-use crate::{EventStorage, MySqlEventStore, SqliteEventStore};
+use crate::{EventStorage, SqliteEventStore};
 
 #[derive(Deserialize, Debug)]
 #[serde(default)]
@@ -37,13 +35,12 @@ pub enum StorageType {
     Sqlite,
 }
 
-pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn EventStorage>> {
-    let s: Arc<dyn EventStorage> = match config.storage_type {
+pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<EventStorage> {
+    let s = match config.storage_type {
         StorageType::Mysql => {
             let conn_str = config.connection_string.as_deref().ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
             let conn_str = expand_env_vars(conn_str)?;
             let mysql_pool = MySqlPool::connect(&conn_str).await?;
-
             let state_path: PathBuf = match &config.state_db_path {
                 Some(p) => PathBuf::from(expand_env_vars(p)?),
                 None => shared::env::default_state_db_path(),
@@ -54,16 +51,15 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<Arc<dyn Even
             let state_path_str = state_path.to_str().ok_or_else(|| anyhow!("state_db_path contains non-UTF8 characters"))?;
             let sqlite_opts = SqliteConnectOptions::new().filename(state_path_str).create_if_missing(true);
             let sidecar = SqliteEventStore::from_pool(SqlitePool::connect_with(sqlite_opts).await?).await;
-
-            Arc::new(MySqlEventStore::new(mysql_pool, sidecar))
+            EventStorage::new_mysql(mysql_pool, sidecar)
         }
         StorageType::Sqlite => {
             let conn_str = config.connection_string.as_deref().ok_or_else(|| anyhow!("connection_string required for SQLite storage"))?;
             let conn_str = expand_env_vars(conn_str)?;
             let opts = SqliteConnectOptions::new().filename(&conn_str).create_if_missing(true);
-            Arc::new(SqliteEventStore::from_pool(SqlitePool::connect_with(opts).await?).await)
+            EventStorage::new_sqlite(SqlitePool::connect_with(opts).await?).await
         }
-        StorageType::Memory => Arc::new(SqliteEventStore::new_in_memory().await),
+        StorageType::Memory => EventStorage::new_in_memory().await,
     };
     Ok(s)
 }
