@@ -1,3 +1,9 @@
+run_mysql: ensure_db
+	cargo run -p file_watcher -- mysql_test_config.toml
+
+ensure_db:
+	docker compose up -d --wait db
+
 run_tests:
 	cargo nextest run
 

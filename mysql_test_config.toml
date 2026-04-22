@@ -1,0 +1,30 @@
+[settings]
+poll_interval_secs = 3
+
+[storage]
+storage_type = "mysql"
+connection_string = "mysql://loganalyser:secret@localhost/loganalyser"
+
+[defaults]
+timestamp_format = "%Y-%m-%d %H:%M:%S"
+
+[components]
+timestamp = '\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+requestreference = 'W\d+-\d+-[^\s]+'
+
+[[parsers]]
+name = "log1"
+glob = "/home/ben/loganalyser/*.log"
+type = "single"
+pattern = '(?P<timestamp>${timestamp}) (?P<data>.*)'
+
+[[parsers]]
+name = "log2"
+glob = "/home/ben/loganalyser/*.log"
+type = "span"
+start_pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) START'
+end_pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) END'
+reference_fields = ["requestreference"]
+nested = [
+    { name = "innerlog1", type = "single", pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) SOMETHING HAPPENED' },
+]
