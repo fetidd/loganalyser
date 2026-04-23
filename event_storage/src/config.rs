@@ -1,7 +1,8 @@
 use anyhow::anyhow;
 use serde::Deserialize;
 use shared::env::expand_env_vars;
-use sqlx::{MySqlPool, SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::{MySqlPool, SqlitePool, mysql::{MySqlConnectOptions, MySqlSslMode}, sqlite::SqliteConnectOptions};
+use std::str::FromStr;
 use std::path::PathBuf;
 use crate::{EventStorage, SqliteEventStore};
 
@@ -40,7 +41,8 @@ pub async fn make_storage(config: &StorageConfig) -> anyhow::Result<EventStorage
         StorageType::Mysql => {
             let conn_str = config.connection_string.as_deref().ok_or_else(|| anyhow!("connection_string required for MySQL storage"))?;
             let conn_str = expand_env_vars(conn_str)?;
-            let mysql_pool = MySqlPool::connect(&conn_str).await?;
+            let opts = MySqlConnectOptions::from_str(&conn_str)?.ssl_mode(MySqlSslMode::Disabled);
+            let mysql_pool = MySqlPool::connect_with(opts).await?;
             let state_path: PathBuf = match &config.state_db_path {
                 Some(p) => PathBuf::from(expand_env_vars(p)?),
                 None => shared::env::default_state_db_path(),

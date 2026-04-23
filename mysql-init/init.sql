@@ -1,3 +1,5 @@
+ALTER USER 'loganalyser'@'%' IDENTIFIED WITH mysql_native_password BY 'secret';
+
 CREATE TABLE IF NOT EXISTS events (
     id          CHAR(36)     NOT NULL PRIMARY KEY,
     event_type  VARCHAR(10)  NOT NULL,
