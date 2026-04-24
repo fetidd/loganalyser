@@ -1,3 +1,5 @@
+all: run_tests
+
 run_mysql: ensure_db
 	cargo run -p file_watcher -- mysql_test_config.toml
 
@@ -15,4 +17,3 @@ release_file_watcher: run_tests build_file_watcher
 
 release: release_file_watcher
 
-all: run_tests
