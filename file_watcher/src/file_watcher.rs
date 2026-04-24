@@ -50,7 +50,6 @@ impl FileWatcher {
         let saved_cursors = state.load_cursors().await?;
         let pending = state.load_pending().await?;
         restore_pending_state(&mut file_parser_map, pending, &saved_cursors);
-        tracing::debug!("{file_parser_map:?}");
         Ok(Self {
             file_parser_map,
             storage: Arc::new(storage),
@@ -86,49 +85,51 @@ impl FileWatcher {
                 } else if file_len > *offset {
                     // The file has been written to since we last checked it, so we need to parse out the new logs
                     tracing::debug!("{path:?} has new log lines...");
-
-                    // Store the end of this file as its cursor so we can start from here after a restart
                     let path_str = path.to_string_lossy().to_string();
-                    let current_file_path = path_str.clone();
-                    let new_cursor = get_file_len(path).await?;
-                    let state_handle = Arc::clone(state);
-                    tokio::spawn(shared::async_retry!(state_handle.save_cursor(&current_file_path, new_cursor)));
 
                     // Read the file to the end and break up into lines
                     let mut file = BufReader::new(fs::File::open(&path).await?);
                     file.seek(SeekFrom::Start(*offset)).await?;
                     let mut lines = file.lines();
-
+                    let mut file_events = vec![];
+                    let mut dirty_parsers = vec![];
                     // Start parsing the lines
-                    let mut all_events = vec![];
                     while let Some(line) = lines.next_line().await? {
                         for parser in parsers.iter_mut() {
                             // If the line is an event we want parsed, store it
                             if let Some(event) = parser.parse(&line) {
-                                all_events.push(event);
+                                file_events.push(event);
                                 break;
                             // Otherwise if the parser is now dirty and has pending spans then save them
                             } else if parser.is_dirty()
-                                && let Some(pending) = parser.pending_spans()
+                                && let Some(pending) = parser.pending_spans().cloned()
                             {
-                                let state_handle = Arc::clone(state);
-                                let fp = path_str.clone();
-                                let pn = parser.name().to_string();
-                                let pending = pending.clone();
-                                tokio::spawn(shared::async_retry!(state_handle.save_pending(&fp, &pn, &pending)));
                                 parser.clean();
+                                dirty_parsers.push((parser.name().to_string(), pending));
                                 break;
                             }
                             // Otherwise try the next parser
                         }
                     }
-                    tracing::debug!("found {all_events:?}");
+                    tracing::debug!("found {file_events:?}");
                     // If we parsed any events, save them all now
-                    if !all_events.is_empty() {
-                        let s = Arc::clone(storage);
-                        tokio::spawn(shared::async_retry!(s.store(&all_events)));
+                    if !file_events.is_empty() {
+                        let storage = Arc::clone(storage);
+                        shared::async_retry!(storage.store(&file_events)).await;
                     }
-                    *offset = get_file_len(path).await?;
+                    if !dirty_parsers.is_empty() {
+                        for (parser_name, pending) in dirty_parsers {
+                            let path_str = path_str.clone();
+                            let state = Arc::clone(state);
+                            shared::async_retry!(state.save_pending(&path_str, &parser_name, &pending)).await;
+                        }
+                    }
+                    // Store the end of this file as its cursor so we can start from here after a restart
+                    let current_file_path = path_str.clone();
+                    let new_cursor = get_file_len(path).await?;
+                    let state = Arc::clone(state);
+                    shared::async_retry!(state.save_cursor(&current_file_path, new_cursor)).await;
+                    *offset = new_cursor;
                 }
             }
             if before_parse.elapsed() > Duration::from_secs(self.settings.poll_interval_secs) {

@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+use std::time::Duration;
+
 use crate::event_filter::Filter;
 
 pub struct Alert {
@@ -17,7 +19,7 @@ impl Alert {
 
 pub enum AlertTrigger {
     /// Fires if quantity are logged within the last duration.
-    Velocity { duration: chrono::Duration, quantity: usize },
+    Velocity { duration: Duration, quantity: usize },
 }
 
 pub enum AlertHandler {
