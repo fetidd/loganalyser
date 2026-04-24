@@ -1,4 +1,4 @@
-use file_watcher::FileWatcher;
+use file_watcher::file_watcher::FileWatcher;
 use tokio::{
     fs,
     signal::{

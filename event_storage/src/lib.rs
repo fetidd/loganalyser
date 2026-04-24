@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use shared::event::Event;
 use sqlx::{MySqlPool, SqlitePool};
 use thiserror::Error;
@@ -8,7 +6,6 @@ pub mod config;
 pub mod event_filter;
 pub(crate) mod memory;
 pub(crate) mod mysql;
-pub mod pending;
 pub(crate) mod sql;
 pub(crate) mod sqlite;
 
@@ -16,7 +13,6 @@ pub use config::{StorageConfig, StorageType, make_storage};
 pub use event_filter::Filter;
 pub use memory::MemoryEventStore;
 pub use mysql::MySqlEventStore;
-pub use pending::PendingSpanRecord;
 pub use sqlite::SqliteEventStore;
 
 #[derive(Debug, Error)]
@@ -39,8 +35,8 @@ pub enum EventStorage {
 }
 
 impl EventStorage {
-    pub fn new_mysql(pool: MySqlPool, sidecar: SqliteEventStore) -> Self {
-        Self::MySql(MySqlEventStore::new(pool, sidecar))
+    pub fn new_mysql(pool: MySqlPool) -> Self {
+        Self::MySql(MySqlEventStore::new(pool))
     }
 
     pub async fn new_sqlite(pool: SqlitePool) -> Self {
@@ -62,34 +58,6 @@ impl EventStorage {
         match self {
             EventStorage::Sqlite(s) | EventStorage::InMemory(s) => s.load(filter).await,
             EventStorage::MySql(s) => s.load(filter).await,
-        }
-    }
-
-    pub async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
-        match self {
-            EventStorage::Sqlite(s) | EventStorage::InMemory(s) => s.save_pending(file_path, parser_name, records).await,
-            EventStorage::MySql(s) => s.save_pending(file_path, parser_name, records).await,
-        }
-    }
-
-    pub async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
-        match self {
-            EventStorage::Sqlite(s) | EventStorage::InMemory(s) => s.save_cursor(file_path, cursor).await,
-            EventStorage::MySql(s) => s.save_cursor(file_path, cursor).await,
-        }
-    }
-
-    pub async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
-        match self {
-            EventStorage::Sqlite(s) | EventStorage::InMemory(s) => s.load_pending().await,
-            EventStorage::MySql(s) => s.load_pending().await,
-        }
-    }
-
-    pub async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
-        match self {
-            EventStorage::Sqlite(s) | EventStorage::InMemory(s) => s.load_file_cursors().await,
-            EventStorage::MySql(s) => s.load_file_cursors().await,
         }
     }
 }

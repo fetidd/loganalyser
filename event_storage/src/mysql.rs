@@ -1,24 +1,19 @@
-use std::collections::HashMap;
-
 use chrono::NaiveDateTime;
 use shared::event::Event;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::pending::PendingSpanRecord;
 use crate::sql::{Dialect, EventForInsert, ParamValue, Params, build_event, build_where};
-use crate::{Filter, Result, SqliteEventStore};
+use crate::{Filter, Result};
 
 #[derive(Debug)]
 pub struct MySqlEventStore {
     pub(crate) pool: sqlx::MySqlPool,
-    /// Local SQLite database used to persist pending spans and file cursors.
-    pub(crate) sidecar: SqliteEventStore,
 }
 
 impl MySqlEventStore {
-    pub fn new(pool: sqlx::MySqlPool, sidecar: SqliteEventStore) -> Self {
-        Self { pool, sidecar }
+    pub fn new(pool: sqlx::MySqlPool) -> Self {
+        Self { pool }
     }
 }
 
@@ -91,22 +86,6 @@ impl MySqlEventStore {
             events.push(build_event(id, event_type, name, timestamp, data_json, parent_id, duration_ms, raw_line)?);
         }
         Ok(events)
-    }
-
-    pub async fn save_pending(&self, file_path: &str, parser_name: &str, records: &[PendingSpanRecord]) -> Result<()> {
-        self.sidecar.save_pending(file_path, parser_name, records).await
-    }
-
-    pub async fn save_cursor(&self, file_path: &str, cursor: u64) -> Result<()> {
-        self.sidecar.save_cursor(file_path, cursor).await
-    }
-
-    pub async fn load_pending(&self) -> Result<Vec<PendingSpanRecord>> {
-        self.sidecar.load_pending().await
-    }
-
-    pub async fn load_file_cursors(&self) -> Result<HashMap<String, u64>> {
-        self.sidecar.load_file_cursors().await
     }
 }
 

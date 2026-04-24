@@ -401,6 +401,7 @@ dependencies = [
  "glob",
  "log_parser",
  "serde",
+ "serde_json",
  "shared",
  "sqlx",
  "tempfile",
@@ -1649,6 +1650,7 @@ dependencies = [
  "chrono",
  "dirs",
  "rstest",
+ "serde",
  "temp-env",
  "uuid",
 ]

@@ -7,6 +7,7 @@ edition = "2024"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 rstest = "0.26.1"

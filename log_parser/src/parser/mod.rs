@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use shared::event::Event;
 
+use crate::pending_span::{PendingSpan, SpanReference};
+
 #[derive(Debug, Clone)]
 pub enum Parser {
     Single(InternalSingleParser),
@@ -44,10 +46,10 @@ impl Parser {
         }
     }
 
-    pub fn pending_spans(&self) -> Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)> {
+    pub fn pending_spans(&self) -> Option<&HashMap<SpanReference, PendingSpan>> {
         match self {
-            Parser::Single(_) => vec![],
-            Parser::Span(p) => p.pending_spans(),
+            Parser::Single(_) => None,
+            Parser::Span(p) => Some(p.pending_spans()),
         }
     }
 

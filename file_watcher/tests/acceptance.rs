@@ -5,6 +5,8 @@ use std::time::Duration;
 use useful::*;
 
 pub const CONFIG: &str = r#"
+state_db_path = "STATE_DB_PATH"
+
 [settings]
 poll_interval_secs = 1
 
@@ -61,8 +63,6 @@ async fn test_one() {
 
     env.append_log(&["{{ts}} AAB START"]);
     env.kill();
-    let pending = env.storage.load_pending().await.expect("failed to load pending");
-    assert!(pending.len() == 1);
     assert!(env.wait_for(Filter::event_type(Cmp::Eq("span")).with_data("ref", Cmp::Eq("AAB")), 1, timeout).await.is_err());
     env.restart().await;
     env.append_log(&["{{ts}} AAB END"]);

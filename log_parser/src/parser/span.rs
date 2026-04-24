@@ -5,6 +5,7 @@ use regex::Regex;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::pending_span::{PendingSpan, SpanReference};
 use shared::event::Event;
 
 use super::Parser;
@@ -113,50 +114,13 @@ impl InternalSpanParser {
         self.pending.dirty
     }
 
-    pub fn pending_spans(&self) -> Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)> {
-        self.pending
-            .spans
-            .iter()
-            .map(|(span_ref, PendingSpan { id, timestamp, data, parent_id, raw_line })| {
-                (
-                    span_ref.0.clone(),
-                    *id,
-                    *timestamp,
-                    data.clone(),
-                    *parent_id,
-                    raw_line.clone(), // TODO can this use refs?
-                )
-            })
-            .collect()
+    pub fn pending_spans(&self) -> &HashMap<SpanReference, PendingSpan> {
+        &self.pending.spans
     }
 
     pub fn restore_pending(&mut self, spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)>) {
         for (span_ref_parts, id, timestamp, data, parent_id, raw_line) in spans {
             self.pending.spans.insert(SpanReference(span_ref_parts), PendingSpan { id, timestamp, data, parent_id, raw_line });
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct SpanReference(Vec<String>);
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingSpan {
-    id: Uuid,
-    timestamp: NaiveDateTime,
-    data: HashMap<String, String>,
-    parent_id: Option<Uuid>,
-    raw_line: Option<String>,
-}
-
-impl PendingSpan {
-    fn new(timestamp: NaiveDateTime, data: HashMap<String, String>, parent_id: Option<Uuid>, raw_line: Option<String>) -> Self {
-        Self {
-            timestamp,
-            data,
-            id: Uuid::new_v4(),
-            parent_id,
-            raw_line,
         }
     }
 }

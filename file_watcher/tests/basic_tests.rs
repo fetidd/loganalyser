@@ -1,8 +1,8 @@
 mod useful;
-use useful::*;
 use event_storage::{Filter, event_filter::Cmp};
 use shared::event::Event;
 use std::{sync::Arc, time::Duration};
+use useful::*;
 
 #[tokio::test]
 async fn basic_functionality() {
@@ -105,15 +105,6 @@ async fn pending_span_completes_when_end_written_after_restart() {
     let timeout = Duration::from_secs(5);
     // Write START and wait for it to be picked up and saved as a pending span.
     append(&env.log_file_path, "2026-01-01 12:00:00 ABC START");
-    let ok = wait_until(
-        || {
-            let storage = Arc::clone(&env.storage);
-            async move { !storage.load_pending().await.unwrap().is_empty() }
-        },
-        timeout,
-    )
-    .await;
-    assert!(ok, "timed out waiting for pending span to be persisted");
     // Restart the watcher — pending span should be restored from DB.
     env.restart().await;
     // Write END after the restart; the new watcher's cursor is at the current
@@ -138,18 +129,8 @@ async fn pending_span_completes_when_end_written_after_restart() {
 #[tokio::test]
 async fn pending_span_completes_when_end_written_during_downtime() {
     let mut env = setup(BASIC_CONFIG).await;
-    let timeout = Duration::from_secs(5);
     // Write START and wait for the pending span to be persisted.
     append(&env.log_file_path, "2026-01-01 12:00:00 ABC START");
-    let ok = wait_until(
-        || {
-            let storage = Arc::clone(&env.storage);
-            async move { !storage.load_pending().await.unwrap().is_empty() }
-        },
-        timeout,
-    )
-    .await;
-    assert!(ok, "timed out waiting for pending span to be persisted");
     // Kill the watcher to simulate a crash.
     env.kill();
     tokio::time::sleep(Duration::from_millis(200)).await; // let abort propagate

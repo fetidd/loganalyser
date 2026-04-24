@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use event_storage::{Filter, StorageConfig, StorageType, make_storage};
-use file_watcher::FileWatcher;
+use file_watcher::file_watcher::FileWatcher;
 use shared::{datetime_from, event::Event};
 use tokio::task::JoinHandle;
 
@@ -73,14 +73,18 @@ impl TestEnv {
     }
 }
 
-/// Create a temp dir, write `config` (with DB_PATH / LOG_PATH substituted),
-/// start a FileWatcher, and open a read-side storage connection.
+/// Create a temp dir, write `config` (with DB_PATH / LOG_PATH / STATE_DB_PATH substituted),
+/// start a FileWatcher, and open read-side storage and state_db connections.
 pub async fn setup(config: &str) -> TestEnv {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let config_file_path = temp_dir.path().join("test_config.toml");
     let log_file_path = temp_dir.path().join("test.log");
     let db_file_path = temp_dir.path().join("test.db");
-    let config = config.replace("DB_PATH", db_file_path.to_str().unwrap()).replace("LOG_PATH", log_file_path.to_str().unwrap());
+    let state_file_path = temp_dir.path().join("test_state");
+    let config = config
+        .replace("STATE_DB_PATH", state_file_path.to_str().unwrap())
+        .replace("DB_PATH", db_file_path.to_str().unwrap())
+        .replace("LOG_PATH", log_file_path.to_str().unwrap());
     std::fs::write(&config_file_path, &config).unwrap();
     std::fs::write(&log_file_path, "").unwrap();
     let mut watcher = FileWatcher::new(std::fs::read(&config_file_path).unwrap()).await.unwrap();
@@ -90,13 +94,10 @@ pub async fn setup(config: &str) -> TestEnv {
     let storage = make_storage(&StorageConfig {
         storage_type: StorageType::Sqlite,
         connection_string: Some(db_file_path.to_str().unwrap().to_string()),
-        state_db_path: None,
     })
     .await
     .unwrap();
-    // Verify both tables are accessible before handing the env to the test.
     storage.load(Filter::new()).await.expect("events table not ready");
-    storage.load_pending().await.expect("pending_spans table not ready");
     TestEnv {
         _temp_dir: temp_dir,
         log_file_path,
@@ -135,6 +136,8 @@ pub fn append(path: &std::path::Path, line: &str) {
 // ---------------------------------------------------------------------------
 
 pub const BASIC_CONFIG: &str = r#"
+state_db_path = "STATE_DB_PATH"
+
 [settings]
 poll_interval_secs = 1
 
