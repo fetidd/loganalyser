@@ -27,17 +27,19 @@ macro_rules! async_retry {
             let mut delay = ::std::time::Duration::from_millis($delay_ms);
             for attempt in 1..=max {
                 match ($expr).await {
-                    ::std::result::Result::Ok(_) => return,
+                    ::std::result::Result::Ok(v) => return ::std::result::Result::Ok(v),
                     ::std::result::Result::Err(e) if attempt < max => {
-                        ::tracing::warn!("attempt {attempt}/{max} failed: {e}, retrying in {delay:?}");
+                        ::tracing::warn!("attempt {attempt}/{max} failed: {e:?}, retrying in {delay:?}");
                         ::tokio::time::sleep(delay).await;
                         delay *= 2;
                     }
                     ::std::result::Result::Err(e) => {
-                        ::tracing::error!("failed after {max} attempts: {e}");
+                        ::tracing::error!("failed after {max} attempts: {e:?}");
+                        return ::std::result::Result::Err(e);
                     }
                 }
             }
+            ::std::unreachable!()
         }
     };
 }
@@ -51,4 +53,10 @@ pub fn datetime_from(ts: &str) -> Result<NaiveDateTime, ParseError> {
     } else {
         NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S")
     }
+}
+
+pub enum ExitReason {
+    DatabaseFailure,
+    Interrupt,
+    Unknown,
 }

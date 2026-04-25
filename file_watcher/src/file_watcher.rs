@@ -8,13 +8,13 @@ use std::{
 
 use event_storage::{EventStorage, make_storage};
 use log_parser::parser::Parser;
+use shared::ExitReason;
 use tokio::{
     fs,
     io::{AsyncBufReadExt, AsyncSeekExt, BufReader},
     sync::oneshot::Receiver,
     time::{Instant, MissedTickBehavior},
 };
-use tracing::warn;
 
 use crate::{
     Settings,
@@ -64,20 +64,33 @@ impl FileWatcher {
         self
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
+    pub async fn run(&mut self) -> anyhow::Result<ExitReason> {
         let Self { file_parser_map, storage, state, settings, rx } = self;
         let mut interval = tokio::time::interval(Duration::from_secs(settings.poll_interval_secs));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay); // TODO make configurable
+        let mut exit_reason = ExitReason::Unknown;
+        let mut storage_failures = 0;
+        let mut failed_events = vec![];
+
         'main: loop {
             if let Some(rx) = rx
                 && rx.try_recv().is_ok()
             {
+                // Set an exit reason here, either requested by the Receiver, or a restart because the events db is screwed
+                exit_reason = ExitReason::Interrupt;
                 break 'main;
             }
+
             interval.tick().await;
+
+            let mut events = vec![]; // TODO move these out of the loop, and keep draining them? Then we won't reallocate Vecs
+            let mut dirty_parsers = vec![];
+            let mut cursor_updates = vec![];
+
             let before_parse = Instant::now();
+
             for (path, ParserOffsets { parsers, offset }) in file_parser_map.iter_mut() {
-                let file_len = get_file_len(path).await?;
+                let file_len = get_file_len(path).await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                 if file_len < *offset {
                     // The file has been truncated for some reason, so we need to rewind to the start of it - assuming that it's because of log rotation or similar
                     *offset = 0;
@@ -85,16 +98,17 @@ impl FileWatcher {
                 } else if file_len > *offset {
                     // The file has been written to since we last checked it, so we need to parse out the new logs
                     tracing::debug!("{path:?} has new log lines...");
-                    let path_str = path.to_string_lossy().to_string();
 
                     // Read the file to the end and break up into lines
-                    let mut file = BufReader::new(fs::File::open(&path).await?);
-                    file.seek(SeekFrom::Start(*offset)).await?;
+                    let mut file = BufReader::new(fs::File::open(&path).await?); // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
+                    file.seek(SeekFrom::Start(*offset)).await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                     let mut lines = file.lines();
+
                     let mut file_events = vec![];
-                    let mut dirty_parsers = vec![];
+
                     // Start parsing the lines
                     while let Some(line) = lines.next_line().await? {
+                        // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                         for parser in parsers.iter_mut() {
                             // If the line is an event we want parsed, store it
                             if let Some(event) = parser.parse(&line) {
@@ -105,38 +119,63 @@ impl FileWatcher {
                                 && let Some(pending) = parser.pending_spans().cloned()
                             {
                                 parser.clean();
-                                dirty_parsers.push((parser.name().to_string(), pending));
+                                dirty_parsers.push((parser.name().to_string(), path, pending)); // TODO is there a better way to denote parsers than using their name?
                                 break;
                             }
                             // Otherwise try the next parser
                         }
                     }
                     tracing::debug!("found {file_events:?}");
-                    // If we parsed any events, save them all now
-                    if !file_events.is_empty() {
-                        let storage = Arc::clone(storage);
-                        shared::async_retry!(storage.store(&file_events)).await;
-                    }
-                    if !dirty_parsers.is_empty() {
-                        for (parser_name, pending) in dirty_parsers {
-                            let path_str = path_str.clone();
-                            let state = Arc::clone(state);
-                            shared::async_retry!(state.save_pending(&path_str, &parser_name, &pending)).await;
-                        }
-                    }
-                    // Store the end of this file as its cursor so we can start from here after a restart
-                    let current_file_path = path_str.clone();
-                    let new_cursor = get_file_len(path).await?;
-                    let state = Arc::clone(state);
-                    shared::async_retry!(state.save_cursor(&current_file_path, new_cursor)).await;
+                    events.extend(file_events);
+                    let new_cursor = get_file_len(path).await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                     *offset = new_cursor;
+                    cursor_updates.push((path.clone(), new_cursor)); // TODO cloning bere could be solved by more effectively storing the paths and related parser/cursors
+                }
+            }
+            // TODO if this fails to store then we don't want to update state, because these would be skipped if we had to restart at the new state
+            // Instead we should hold on to the events we failed to store, and attempt to store them with the next batch
+            // If it fails a second time then the database is fucked, and we should restart
+            if !events.is_empty() {
+                let storage = Arc::clone(storage);
+                let events_slice: &[_] = &events; // &[Event] is Copy, so async move copies the fat pointer rather than moving `events`
+                if let Err(error) = shared::async_retry!(storage.store(events_slice)).await {
+                    // Even after retrying we failed to store the found events
+                    // We do not want to save the new state as we havent stored the events
+                    if storage_failures == 0 {
+                        // If this is the first time this connection has done this, queue the events and try the loop again, hopefully next time these events and the next ones will be able to store
+                        failed_events.extend(events.drain(..));
+                        storage_failures += 1;
+                        continue 'main;
+                    } else {
+                        // If this is the second time we are here, then we should restart the watcher with a new db connection
+                        let num_failed = events.len();
+                        tracing::error!("Failed to store {num_failed} events: {error:?}",);
+                        exit_reason = ExitReason::DatabaseFailure;
+                        break 'main;
+                    }
+                }
+            }
+            if !dirty_parsers.is_empty() {
+                for (parser_name, path, pending) in dirty_parsers {
+                    let path = path.to_str().expect("Invalid path");
+                    let state = Arc::clone(state);
+                    let _ = shared::async_retry!(state.save_pending(path, &parser_name, &pending)).await;
+                }
+            }
+            // Store the end of this file as its cursor so we can start from here after a restart
+            if !cursor_updates.is_empty() {
+                for (path, cursor) in cursor_updates {
+                    let state = Arc::clone(state);
+                    let path = path.to_str().expect("Invalid path");
+                    let _ = shared::async_retry!(state.save_cursor(path, cursor)).await;
                 }
             }
             if before_parse.elapsed() > Duration::from_secs(self.settings.poll_interval_secs) {
-                warn!("processing time exceeded polling interval!");
+                // TODO we won't check this on a storage failure
+                tracing::warn!("processing time exceeded polling interval!");
             }
         }
-        Ok(())
+        Ok(exit_reason)
     }
 }
 

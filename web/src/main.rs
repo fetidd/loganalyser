@@ -105,7 +105,7 @@ async fn seed_store(store: &EventStorage) -> anyhow::Result<()> {
         ));
     }
 
-    store.store(&events).await?;
+    store.store(&events).await.expect("failed seeding 1");
 
     // Traced request chains with parent/child relationships
     let mut traced: Vec<Event> = Vec::new();
@@ -198,7 +198,7 @@ async fn seed_store(store: &EventStorage) -> anyhow::Result<()> {
         );
     }
 
-    store.store(&traced).await?;
+    store.store(&traced).await.expect("failed seeding 2");
     Ok(())
 }
 

@@ -20,5 +20,6 @@ async fn main() -> anyhow::Result<()> {
         _ = sigterm.recv() => { println!("received SIGTERM, exiting..."); let _ = tx.send(true); }
         _ = ctrl_c() => { println!("CTRL-C pressed, exiting..."); let _ = tx.send(true); }
     }
-    main_join_handle.await?
+    main_join_handle.await??;
+    Ok(())
 }
