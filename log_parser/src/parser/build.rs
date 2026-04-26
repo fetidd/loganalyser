@@ -2,6 +2,7 @@ use std::{cell::LazyCell, collections::HashMap, path::PathBuf};
 
 use regex::Regex;
 use serde::Deserialize;
+use shared::env::expand_vars;
 
 use crate::error::{Error, Result};
 
@@ -52,12 +53,6 @@ struct CommonConfig {
     name: String,
     glob: Option<String>,
     timestamp_format: Option<String>,
-    #[serde(default = "default_include_raw")]
-    include_raw: bool,
-}
-
-fn default_include_raw() -> bool {
-    true
 }
 
 impl RawParserConfig {
@@ -122,7 +117,7 @@ fn build_single(c: &RawSingleConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
         name: c.common.name.clone(),
         pattern,
         timestamp_format: ctx.timestamp_format.to_string(),
-        include_raw: c.common.include_raw,
+        file_seed: None,
     }))
 }
 
@@ -161,7 +156,7 @@ fn build_span(c: &RawSpanConfig, ctx: &BuildCtx<'_>) -> Result<Parser> {
             build_parser(n, &nested_ctx)
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Parser::Span(InternalSpanParser::new(c.common.name.clone(), ctx.timestamp_format.to_string(), start, end, nested, ref_fields, c.common.include_raw)))
+    Ok(Parser::Span(InternalSpanParser::new(c.common.name.clone(), ctx.timestamp_format.to_string(), start, end, nested, ref_fields)))
 }
 
 fn compile_pattern(pattern: &str, components: &HashMap<String, String>) -> Result<Regex> {
@@ -175,33 +170,8 @@ fn compile_pattern(pattern: &str, components: &HashMap<String, String>) -> Resul
 /// Components are pure pattern fragments; named fields must be declared
 /// explicitly with `(?P<name>...)` in the pattern itself.
 fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Result<String> {
-    let mut result = String::with_capacity(pattern.len() * 2);
-    let bytes = pattern.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-    while i < len {
-        if bytes[i] == b'\\' {
-            result.push(bytes[i] as char);
-            i += 1;
-            if i < len {
-                result.push(bytes[i] as char);
-                i += 1;
-            }
-            continue;
-        }
-        if bytes[i] == b'$' && i + 1 < len && bytes[i + 1] == b'{' {
-            let name_start = i + 2;
-            let close = pattern[name_start..].find('}').ok_or_else(|| error(&format!("unclosed '${{' at position {i}")))?;
-            let name = &pattern[name_start..name_start + close];
-            let value = components.get(name).ok_or_else(|| error(&format!("missing component: {name}")))?;
-            result.push_str(&format!("(?:{value})"));
-            i = name_start + close + 1;
-            continue;
-        }
-        result.push(bytes[i] as char);
-        i += 1;
-    }
-    Ok(result)
+    expand_vars(pattern, |name| components.get(name).map(|v| format!("(?:{v})")))
+        .map_err(|e| error(&e.to_string()))
 }
 
 fn validate_required_fields(pattern: &Regex, fields: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {
@@ -386,7 +356,6 @@ type = "single"
 name = "my_parser"
 timestamp_format = "%Y-%m-%d %H:%M:%S"
 pattern = '(?P<timestamp>\d+) (?P<level>\w+)'
-include_raw = false
 "#;
 
     const SPAN_VALID: &str = r#"

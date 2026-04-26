@@ -45,7 +45,7 @@ impl MySqlEventStore {
         let mut tx = self.pool.begin().await?;
         for event in events {
             let e = EventForInsert::from_event(event)?;
-            sqlx::query(EventForInsert::insert_sql())
+            sqlx::query(EventForInsert::insert_mysql_sql())
                 .bind(e.id)
                 .bind(e.event_type)
                 .bind(e.name)

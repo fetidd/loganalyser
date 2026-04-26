@@ -34,6 +34,7 @@ import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from builtins import print as _print
 
 _GREEN  = "\033[92m"
 _YELLOW = "\033[93m"
@@ -46,6 +47,14 @@ _END_RE   = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) END$'
 _LOG_RE   = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} LOG ')
 _NOTE_RE  = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z]{3} NOTE ')
 
+LOGFILE = open("./load_test.log", "w")
+
+def print(*args, **kw):
+    _print(*args, **kw)
+    if len(args) == 1:
+        LOGFILE.write(args[0] + "\n")
+    elif len(args) > 1:
+        LOGFILE.write(str(args) + "\n")
 
 # ---------------------------------------------------------------------------
 # Build
@@ -374,13 +383,16 @@ class MetricsThread(threading.Thread):
         interval = 2.0
         last_stored = 0
         t_start = time.monotonic()
+        t_last_sample = t_start
 
         while not self.stop.wait(interval):
-            t = round(time.monotonic() - t_start)
+            t_now = time.monotonic()
+            t = round(t_now - t_start)
             line_equiv = self._query_line_equivalent()
+            actual_elapsed = time.monotonic() - t_last_sample
             written = sum(v for v in self.writer_stats.values() if isinstance(v, int))
             noise = sum(v for v in self.noise_stats.values() if isinstance(v, int))
-            events_per_sec = round((line_equiv - last_stored) / interval)
+            events_per_sec = round((line_equiv - last_stored) / actual_elapsed)
             pending = max(0, (written - noise) - line_equiv)
             rss = self._rss_mb()
             overruns = self.watcher_counters["overruns"]
@@ -391,6 +403,7 @@ class MetricsThread(threading.Thread):
 
             self.samples.append({"t": t, "written": written, "stored": line_equiv, "events_per_sec": events_per_sec})
             last_stored = line_equiv
+            t_last_sample = time.monotonic()
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +495,7 @@ class LoadTest:
         self.tmpdir: Path
         self.log_paths: list[Path]
         self.db_path: Path | None
+        self.state_path: Path
         self.config_path: Path
         self.proc: subprocess.Popen
         self.relay: StderrRelay
@@ -510,8 +524,8 @@ class LoadTest:
             p.touch()
 
         self.db_path = None if self.mysql_url else self.tmpdir / "events.db"
-        state_path = self.tmpdir / "state.db"
-        self.config_path = generate_config(self.tmpdir, self.log_paths, self.db_path, state_path, self.args.poll_interval, self.mysql_url)
+        self.state_path = self.tmpdir / "state.db"
+        self.config_path = generate_config(self.tmpdir, self.log_paths, self.db_path, self.state_path, self.args.poll_interval, self.mysql_url)
 
         if self.mysql_url:
             _mysql_truncate(self.mysql_url)
@@ -520,6 +534,7 @@ class LoadTest:
         profile_summary = "  ".join(f"{p}×{n}" for p, n in sorted(profile_counts.items()))
         storage_label = self.mysql_url or str(self.db_path)
         print(f"{_H}config:   {self.config_path}")
+        print(f"{_H}state:   {self.state_path}")
         print(f"{_H}storage:  {storage_label}")
         print(f"{_H}files:    {self.args.files}  profiles: {profile_summary}  rate: {self.args.rate} lines/sec/file  duration: {self.args.duration}s")
         print(f"{_H}total write rate: ~{self.args.rate * self.args.files} lines/sec")
@@ -661,7 +676,9 @@ class LoadTest:
         print(f"{_H}storage errors:   {self.watcher_counters['errors']}")
         if self.metrics.samples:
             peak_eps = max(s["events_per_sec"] for s in self.metrics.samples)
-            print(f"{_H}peak events/sec:  {peak_eps:,}")
+            avg_eps = round(self.final_stored / max(1, self.args.duration))
+            print(f"{_H}avg line-equiv/sec:{avg_eps:>6,}  (total stored ÷ duration)")
+            print(f"{_H}peak line-equiv/sec:{peak_eps:>5,}  (best 2s window — may be inflated by poll batch alignment)")
         span_stats = self.metrics.query_span_stats()
         if span_stats:
             print(f"{_H}span lifetime:    avg={span_stats['avg_s']}s  min={span_stats['min_s']}s  max={span_stats['max_s']}s  ({span_stats['count']:,} completed spans)")

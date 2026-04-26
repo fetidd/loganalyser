@@ -53,7 +53,7 @@ impl TestEnv {
     pub async fn restart(&mut self) {
         self.jh.abort();
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let mut watcher = FileWatcher::new(std::fs::read(&self.config_file_path).unwrap()).await.unwrap();
+        let mut watcher = FileWatcher::new(&std::fs::read(&self.config_file_path).unwrap()).await.unwrap();
         self.jh = tokio::spawn(async move {
             watcher.run().await.expect("watcher run failed");
         });
@@ -87,7 +87,7 @@ pub async fn setup(config: &str) -> TestEnv {
         .replace("LOG_PATH", log_file_path.to_str().unwrap());
     std::fs::write(&config_file_path, &config).unwrap();
     std::fs::write(&log_file_path, "").unwrap();
-    let mut watcher = FileWatcher::new(std::fs::read(&config_file_path).unwrap()).await.unwrap();
+    let mut watcher = FileWatcher::new(&std::fs::read(&config_file_path).unwrap()).await.unwrap();
     let jh = tokio::spawn(async move {
         watcher.run().await.expect("watcher run failed");
     });

@@ -1,0 +1,151 @@
+[92m[harness][0m building file_watcher (release)...
+[92m[harness][0m built: /home/ben/loganalyser/target/release/file_watcher
+[92m[harness][0m truncated events table
+[92m[harness][0m config:   /tmp/fw_loadtest_7knvrfbr/config.toml
+[92m[harness][0m state:   /tmp/fw_loadtest_7knvrfbr/state.db
+[92m[harness][0m storage:  mysql://loganalyser:secret@localhost/loganalyser
+[92m[harness][0m files:    200  profiles: full×67  singles_only×67  spans_only×66  rate: 50 lines/sec/file  duration: 60s
+[92m[harness][0m total write rate: ~10000 lines/sec
+[92m[harness][0m watcher PID 93304 started
+[93m[watcher][0m  [2m2026-04-26T20:10:41.352762Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m config created: Config { settings: Settings { poll_interval_secs: 3 }, storage: StorageConfig { storage_type: Mysql, connection_string: Some("mysql://loganalyser:secret@localhost/loganalyser") }, state_db_path: Some("/tmp/fw_loadtest_7knvrfbr/state.db") }
+[93m[watcher][0m  [2m2026-04-26T20:10:41.355629Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m storage created: MySql(MySqlEventStore { pool: Pool { size: 1, num_idle: 1, is_closed: false, options: PoolOptions { max_connections: 10, min_connections: 0, connect_timeout: 30s, max_lifetime: Some(1800s), idle_timeout: Some(600s), test_before_acquire: true } } })
+[93m[watcher][0m  [2m2026-04-26T20:10:41.357310Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m state created: State { pool: Pool { size: 2, num_idle: 1, is_closed: false, options: PoolOptions { max_connections: 10, min_connections: 0, connect_timeout: 30s, max_lifetime: Some(1800s), idle_timeout: Some(600s), test_before_acquire: true } } }
+[93m[watcher][0m  [2m2026-04-26T20:10:41.663515Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:10:41.679554Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m crash scheduled at t=24.0s
+[92m[harness][0m writing for 60s — watch for [93m[watcher][0m lines below
+
+[93m[watcher][0m  [2m2026-04-26T20:10:44.664306Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:10:44.847398Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=   2s  written= 21,045  line_equiv=      0  lines/sec=    0  pending= 3,564  overruns=0  errors=0  rss=203.0MB
+[93m[watcher][0m  [2m2026-04-26T20:10:46.060973Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 2290 new events
+[93m[watcher][0m  [2m2026-04-26T20:10:46.857898Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 2430 pending spans from 1349 parsers
+[93m[watcher][0m  [2m2026-04-26T20:10:46.857912Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[92m[harness][0m t=   4s  written= 41,033  line_equiv=  2,798  lines/sec= 1395  pending= 4,018  overruns=0  errors=0  rss=203.0MB
+[93m[watcher][0m  [2m2026-04-26T20:10:47.664122Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:10:47.874514Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=   6s  written= 61,045  line_equiv=  2,798  lines/sec=    0  pending= 7,304  overruns=0  errors=0  rss=241.1MB
+[93m[watcher][0m  [2m2026-04-26T20:10:49.652022Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 3901 new events
+[93m[watcher][0m  [2m2026-04-26T20:10:51.017808Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 5549 pending spans from 1961 parsers
+[93m[watcher][0m  [2m2026-04-26T20:10:51.017833Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[92m[harness][0m t=   8s  written= 81,136  line_equiv=  7,653  lines/sec= 2402  pending= 5,806  overruns=0  errors=0  rss=241.1MB
+[93m[watcher][0m  [2m2026-04-26T20:10:51.069847Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:10:51.071735Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:10:51.270075Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  10s  written=101,227  line_equiv=  7,653  lines/sec=    0  pending= 9,164  overruns=1  errors=0  rss=267.7MB
+[93m[watcher][0m  [2m2026-04-26T20:10:53.369734Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 4441 new events
+[93m[watcher][0m  [2m2026-04-26T20:10:55.003551Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 7124 pending spans from 2263 parsers
+[93m[watcher][0m  [2m2026-04-26T20:10:55.003576Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:10:55.050059Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:10:55.052775Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[92m[harness][0m t=  12s  written=121,236  line_equiv= 13,193  lines/sec= 2761  pending= 6,868  overruns=2  errors=0  rss=267.7MB
+[93m[watcher][0m  [2m2026-04-26T20:10:55.230883Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  14s  written=141,205  line_equiv= 13,193  lines/sec=    0  pending=10,195  overruns=2  errors=0  rss=277.7MB
+[93m[watcher][0m  [2m2026-04-26T20:10:57.540160Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 5178 new events
+[92m[harness][0m t=  16s  written=161,285  line_equiv= 19,675  lines/sec= 3215  pending= 7,109  overruns=2  errors=0  rss=277.7MB
+[93m[watcher][0m  [2m2026-04-26T20:10:59.538273Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 9133 pending spans from 2636 parsers
+[93m[watcher][0m  [2m2026-04-26T20:10:59.538299Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:10:59.589514Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:10:59.592438Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:10:59.780843Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  18s  written=181,289  line_equiv= 19,675  lines/sec=    0  pending=10,383  overruns=3  errors=0  rss=293.2MB
+[93m[watcher][0m  [2m2026-04-26T20:11:02.505831Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 5984 new events
+[92m[harness][0m t=  20s  written=201,300  line_equiv= 27,197  lines/sec= 3743  pending= 6,261  overruns=3  errors=0  rss=293.2MB
+[93m[watcher][0m  [2m2026-04-26T20:11:04.742182Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 9993 pending spans from 3054 parsers
+[93m[watcher][0m  [2m2026-04-26T20:11:04.742207Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:11:04.793282Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:11:04.796163Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:11:04.976687Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  22s  written=221,329  line_equiv= 27,197  lines/sec=    0  pending= 9,607  overruns=4  errors=0  rss=300.6MB
+
+[92m[harness][0m *** SIMULATED CRASH — SIGKILL pid 93304 ***
+[92m[harness][0m t=  24s  written=241,336  line_equiv= 27,197  lines/sec=    0  pending=13,027  overruns=4  errors=0
+[92m[harness][0m watcher restarted — new pid 93529
+[93m[watcher][0m  [2m2026-04-26T20:11:07.339207Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m config created: Config { settings: Settings { poll_interval_secs: 3 }, storage: StorageConfig { storage_type: Mysql, connection_string: Some("mysql://loganalyser:secret@localhost/loganalyser") }, state_db_path: Some("/tmp/fw_loadtest_7knvrfbr/state.db") }
+[93m[watcher][0m  [2m2026-04-26T20:11:07.341797Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m storage created: MySql(MySqlEventStore { pool: Pool { size: 1, num_idle: 1, is_closed: false, options: PoolOptions { max_connections: 10, min_connections: 0, connect_timeout: 30s, max_lifetime: Some(1800s), idle_timeout: Some(600s), test_before_acquire: true } } })
+[93m[watcher][0m  [2m2026-04-26T20:11:07.343283Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m state created: State { pool: Pool { size: 2, num_idle: 1, is_closed: false, options: PoolOptions { max_connections: 10, min_connections: 0, connect_timeout: 30s, max_lifetime: Some(1800s), idle_timeout: Some(600s), test_before_acquire: true } } }
+[93m[watcher][0m  [2m2026-04-26T20:11:07.655203Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:11:07.947088Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  26s  written=261,319  line_equiv= 27,197  lines/sec=    0  pending=16,397  overruns=4  errors=0
+[92m[harness][0m t=  28s  written=281,363  line_equiv= 27,197  lines/sec=    0  pending=19,772  overruns=4  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:12.988068Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 10845 new events
+[92m[harness][0m t=  30s  written=301,403  line_equiv= 40,780  lines/sec= 6746  pending= 9,483  overruns=4  errors=0
+[92m[harness][0m t=  32s  written=321,420  line_equiv= 40,780  lines/sec=    0  pending=12,875  overruns=4  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:17.078866Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 18765 pending spans from 5515 parsers
+[93m[watcher][0m  [2m2026-04-26T20:11:17.078892Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:11:17.127058Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:11:17.132397Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[92m[harness][0m t=  34s  written=341,432  line_equiv= 40,780  lines/sec=    0  pending=16,148  overruns=5  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:17.460868Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  36s  written=361,461  line_equiv= 40,780  lines/sec=    0  pending=19,557  overruns=5  errors=0
+[92m[harness][0m t=  38s  written=381,563  line_equiv= 40,780  lines/sec=    0  pending=22,941  overruns=5  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:23.039396Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 12639 new events
+[92m[harness][0m t=  40s  written=401,607  line_equiv= 56,503  lines/sec= 7806  pending=10,539  overruns=5  errors=0
+[92m[harness][0m t=  42s  written=421,660  line_equiv= 56,503  lines/sec=    0  pending=13,912  overruns=5  errors=0
+[92m[harness][0m t=  44s  written=441,702  line_equiv= 56,503  lines/sec=    0  pending=17,244  overruns=5  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:27.748828Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 22628 pending spans from 6212 parsers
+[93m[watcher][0m  [2m2026-04-26T20:11:27.748853Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:11:27.802961Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:11:27.809290Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:11:28.115017Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  46s  written=461,706  line_equiv= 56,503  lines/sec=    0  pending=20,520  overruns=6  errors=0
+[92m[harness][0m t=  48s  written=481,746  line_equiv= 56,503  lines/sec=    0  pending=23,868  overruns=6  errors=0
+[92m[harness][0m t=  50s  written=501,786  line_equiv= 56,503  lines/sec=    0  pending=27,150  overruns=6  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:34.479169Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 14248 new events
+[92m[harness][0m t=  52s  written=521,888  line_equiv= 74,292  lines/sec= 8807  pending=12,681  overruns=6  errors=0
+[92m[harness][0m t=  54s  written=541,967  line_equiv= 74,292  lines/sec=    0  pending=16,000  overruns=6  errors=0
+[92m[harness][0m t=  56s  written=562,075  line_equiv= 74,292  lines/sec=    0  pending=19,316  overruns=6  errors=0
+[93m[watcher][0m  [2m2026-04-26T20:11:39.760134Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 25996 pending spans from 7056 parsers
+[93m[watcher][0m  [2m2026-04-26T20:11:39.760154Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:11:39.804342Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:11:39.813116Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:11:40.187333Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m t=  58s  written=582,139  line_equiv= 74,292  lines/sec=    0  pending=22,583  overruns=7  errors=0
+
+[92m[harness][0m stopping writers...
+[92m[harness][0m all open spans flushed (498,247 noise lines written)
+[92m[harness][0m writers done (598,227 lines, 498,247 noise) — waiting for watcher to drain...
+
+[92m[harness][0m drain  t+  0s  line_equiv= 74,292 /  99,980  remaining=25,688
+[92m[harness][0m drain  t+  4s  line_equiv= 74,292 /  99,980  remaining=25,688
+[93m[watcher][0m  [2m2026-04-26T20:11:47.543099Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 15915 new events
+[92m[harness][0m drain  t+  7s  line_equiv= 94,078 /  99,980  remaining= 5,902
+[93m[watcher][0m  [2m2026-04-26T20:11:53.167699Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 28516 pending spans from 7738 parsers
+[93m[watcher][0m  [2m2026-04-26T20:11:53.167724Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:11:53.219741Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:11:53.227357Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:11:53.377482Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m drain  t+ 11s  line_equiv= 94,078 /  99,980  remaining= 5,902
+[93m[watcher][0m  [2m2026-04-26T20:11:55.470524Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 4451 new events
+[92m[harness][0m drain  t+ 14s  line_equiv= 99,980 /  99,980  remaining=     0
+[93m[watcher][0m  [2m2026-04-26T20:11:57.120180Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saved 8040 pending spans from 2392 parsers
+[93m[watcher][0m  [2m2026-04-26T20:11:57.120205Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Saving 200 new cursor locations...
+[93m[watcher][0m  [2m2026-04-26T20:11:57.162149Z[0m [33m WARN[0m [2mfile_watcher::file_watcher[0m[2m:[0m processing time exceeded polling interval!
+[93m[watcher][0m  [2m2026-04-26T20:11:57.165565Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:11:57.183263Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[93m[watcher][0m  [2m2026-04-26T20:12:00.164509Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:12:00.182722Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m drain  t+ 18s  line_equiv= 99,980 /  99,980  remaining=     0
+[93m[watcher][0m  [2m2026-04-26T20:12:03.164930Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:12:03.181820Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[92m[harness][0m drain  t+ 21s  line_equiv= 99,980 /  99,980  remaining=     0
+[92m[harness][0m drain complete — watcher has caught up
+
+[92m[harness][0m sending SIGTERM to watcher...
+[93m[watcher][0m  received SIGTERM, exiting...
+[93m[watcher][0m  [2m2026-04-26T20:12:06.164493Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing...
+[93m[watcher][0m  [2m2026-04-26T20:12:06.182253Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Parsing complete!
+[93m[watcher][0m  [2m2026-04-26T20:12:06.182278Z[0m [34mDEBUG[0m [2mfile_watcher::file_watcher[0m[2m:[0m Graceful shutdown complete
+[92m[harness][0m diff: all parseable lines accounted for ✓
+[92m[harness][0m ═══ LOAD TEST COMPLETE ═══
+[92m[harness][0m duration:         60s
+[92m[harness][0m files:            200  (1000 parsers each)
+[92m[harness][0m lines written:    598,227  (9,970/sec avg)
+[92m[harness][0m noise lines:      498,247  (5.0x parseable)
+[92m[harness][0m line-equiv stored: 99,980
+[92m[harness][0m unaccounted:      0 ✓
+[92m[harness][0m overrun warnings: 9
+[92m[harness][0m storage errors:   0
+[92m[harness][0m avg line-equiv/sec: 1,666  (total stored ÷ duration)
+[92m[harness][0m peak line-equiv/sec:8,807  (best 2s window — may be inflated by poll batch alignment)
+[92m[harness][0m span lifetime:    avg=1.43s  min=0.0s  max=30.0s  (20,088 completed spans)

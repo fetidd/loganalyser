@@ -74,7 +74,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_in_memory_storage() {
-        let event = Event::new_single("single1", shared::datetime_from("2026-01-01").unwrap(), HashMap::new(), None);
+        let event = Event::new_single("single1", shared::datetime_from("2026-01-01").unwrap(), HashMap::new(), String::new());
         let store = EventStorage::new_in_memory().await;
         store.store(&[event.clone()]).await.expect("failed to store");
         let read = store.load(Filter::new()).await.expect("failed to load");

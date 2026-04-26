@@ -66,9 +66,21 @@ impl Parser {
         }
     }
 
-    pub fn restore_pending(&mut self, spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, Option<String>)>) {
+    pub fn restore_pending(&mut self, spans: Vec<(Vec<String>, Uuid, NaiveDateTime, HashMap<String, String>, Option<Uuid>, String)>) {
         if let Parser::Span(p) = self {
             p.restore_pending(spans);
+        }
+    }
+
+    pub fn set_file_seed(&mut self, seed: &str) {
+        match self {
+            Parser::Single(p) => p.file_seed = Some(seed.to_string()),
+            Parser::Span(p) => {
+                p.file_seed = Some(seed.to_string());
+                for nested in p.nested.iter_mut() {
+                    nested.set_file_seed(seed);
+                }
+            }
         }
     }
 }

@@ -52,21 +52,13 @@ pub(crate) struct EventForInsert {
     pub duration_ms: Option<i64>,
     pub parent_id: Option<String>,
     pub data_json: String,
-    pub raw_line: Option<String>,
+    pub raw_line: String,
 }
 
 impl EventForInsert {
     pub(crate) fn from_event(event: &Event) -> crate::Result<Self> {
         match event {
-            Event::Span {
-                id,
-                name,
-                timestamp,
-                data,
-                duration,
-                parent_id,
-                raw_lines,
-            } => Ok(Self {
+            Event::Span { id, name, timestamp, data, duration, parent_id, raw_lines } => Ok(Self {
                 id: id.to_string(),
                 event_type: "span",
                 name: name.clone(),
@@ -74,7 +66,7 @@ impl EventForInsert {
                 duration_ms: Some(duration.num_milliseconds()),
                 parent_id: parent_id.map(|p| p.to_string()),
                 data_json: serde_json::to_string(data)?,
-                raw_line: raw_lines.as_ref().map(|(s1, s2)| format!("{s1}\n{s2}")),
+                raw_line: format!("{}\n{}", raw_lines.0, raw_lines.1),
             }),
             Event::Single { id, name, timestamp, data, parent_id, raw_line } => Ok(Self {
                 id: id.to_string(),
@@ -89,32 +81,29 @@ impl EventForInsert {
         }
     }
 
-    pub(crate) fn insert_sql() -> &'static str {
-        "INSERT INTO events (id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line) \
+    pub(crate) fn insert_sqlite_sql() -> &'static str {
+        "INSERT OR IGNORE INTO events (id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    }
+
+    pub(crate) fn insert_mysql_sql() -> &'static str {
+        "INSERT IGNORE INTO events (id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     }
 }
 
 pub(crate) fn build_event(id: Uuid, event_type: String, name: String, timestamp: NaiveDateTime, data_json: String, parent_id: Option<Uuid>, duration_ms: Option<i64>, raw_line: Option<String>) -> crate::Result<Event> {
     let data: HashMap<String, String> = serde_json::from_str(&data_json)?;
+    let raw_line = raw_line.unwrap_or_default();
     match event_type.as_str() {
-        "span" => Ok(Event::Span {
-            id,
-            name,
-            timestamp,
-            data,
-            duration: Duration::milliseconds(duration_ms.unwrap_or(0)),
-            parent_id,
-            raw_lines: raw_line.map(|mut s| {
-                let mut raw_lines = (String::new(), String::new());
-                if let Some(split_i) = s.find('\n') {
-                    raw_lines.1 = s.split_off(split_i + 1);
-                    s.pop(); // remove the '\n'
-                    raw_lines.0 = s;
-                }
-                raw_lines
-            }),
-        }),
+        "span" => {
+            let raw_lines = if let Some(split_i) = raw_line.find('\n') {
+                (raw_line[..split_i].to_string(), raw_line[split_i + 1..].to_string())
+            } else {
+                (raw_line, String::new())
+            };
+            Ok(Event::Span { id, name, timestamp, data, duration: Duration::milliseconds(duration_ms.unwrap_or(0)), parent_id, raw_lines })
+        }
         "single" => Ok(Event::Single { id, name, timestamp, data, parent_id, raw_line }),
         other => Err(crate::Error::Storage(format!("unknown event_type: {other}"))),
     }

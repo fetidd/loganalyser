@@ -10,7 +10,7 @@ chrono = "0.4.44"
 regex = "1.12.3"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.0.3"
-uuid = { version = "1.22.0", features = ["v4"] }
+uuid = { version = "1.22.0", features = ["v4", "v5"] }
 glob = "0.3"
 tracing = "0.1"
 

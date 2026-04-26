@@ -151,13 +151,13 @@ pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Ht
             id.to_string(),
             parent_id.map(|p| p.to_string()),
             data.iter().map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() }).collect::<Vec<_>>(),
-            raw_lines.as_ref().map(|(s1, s2)| format!("{s1} - {s2}")),
+            Some(format!("{} - {}", raw_lines.0, raw_lines.1)),
         ),
         Event::Single { id, parent_id, data, raw_line, .. } => (
             id.to_string(),
             parent_id.map(|p| p.to_string()),
             data.iter().map(|(k, v)| FieldEntry { key: k.clone(), val: v.clone() }).collect::<Vec<_>>(),
-            raw_line.as_ref().map(|s| s.to_string()),
+            Some(raw_line.clone()),
         ),
     };
     fields.sort_by(|a, b| a.key.cmp(&b.key));

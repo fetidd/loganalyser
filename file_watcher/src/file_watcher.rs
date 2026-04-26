@@ -27,7 +27,7 @@ pub struct FileWatcher {
     storage: Arc<EventStorage>,
     state: Arc<State>,
     settings: Settings,
-    rx: Option<Receiver<bool>>,
+    rx: Option<Receiver<ExitReason>>,
 }
 
 type FileParserMapping = HashMap<PathBuf, ParserOffsets>;
@@ -39,7 +39,7 @@ struct ParserOffsets {
 }
 
 impl FileWatcher {
-    pub async fn new(config_file: Vec<u8>) -> anyhow::Result<Self> {
+    pub async fn new(config_file: &[u8]) -> anyhow::Result<Self> {
         let config: Config = toml::from_slice(&config_file)?;
         tracing::debug!("config created: {config:?}");
         let storage = make_storage(&config.storage).await?;
@@ -62,7 +62,7 @@ impl FileWatcher {
         })
     }
 
-    pub fn with_receiver(mut self, rx: Receiver<bool>) -> Self {
+    pub fn with_receiver(mut self, rx: Receiver<ExitReason>) -> Self {
         self.rx = Some(rx);
         self
     }
@@ -79,11 +79,13 @@ impl FileWatcher {
             if let Some(rx) = rx
                 && rx.try_recv().is_ok()
             {
+                tracing::debug!("Graceful shutdown complete");
                 return Ok(ExitReason::Interrupt);
             }
 
             // Wait until the configured poll interval has elapsed before running again
             interval.tick().await;
+            tracing::debug!("Parsing...");
 
             let before_parse = Instant::now();
             let mut dirty_parsers = vec![]; // TODO move these out of the loop, and keep draining them? Then we won't reallocate Vecs - requires some refactoring as they borrow from the current loop
@@ -105,29 +107,37 @@ impl FileWatcher {
 
                     // Start parsing the lines
                     while let Some(line) = lines.next_line().await? {
-                        // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                         for parser in parsers.iter_mut() {
-                            // If the line is an event we want parsed, store it
                             if let Some(event) = parser.parse(&line) {
                                 file_events.push(event);
+                                // Span completion sets dirty AND returns Some; flush here so the
+                                // state DB doesn't retain a stale entry until the next line.
+                                if parser.is_dirty()
+                                    && let Some(pending) = parser.pending_spans().cloned()
+                                {
+                                    // TODO dry with below, free fn?
+                                    // TODO can we get around cloning the hashmap here?
+                                    parser.clean();
+                                    dirty_parsers.push((parser.name().to_string(), path, pending));
+                                }
                                 break;
-                            // Otherwise if the parser is now dirty and has pending spans then save them
-                            } else if parser.is_dirty()
-                                && let Some(pending) = parser.pending_spans().cloned()
-                            {
-                                parser.clean();
-                                dirty_parsers.push((parser.name().to_string(), path, pending)); // TODO is there a better way to denote parsers than using their name? Maybe register them in a map at the top with ids?
+                            } else if parser.is_dirty() {
+                                // Span START consumed this line; flush and don't let other parsers claim it.
+                                if let Some(pending) = parser.pending_spans().cloned() {
+                                    parser.clean();
+                                    dirty_parsers.push((parser.name().to_string(), path, pending));
+                                }
                                 break;
                             }
-                            // Otherwise try the next parser
                         }
                     }
                     events.extend(file_events);
                     let new_cursor = lines.into_inner().stream_position().await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                     *offset = new_cursor;
-                    cursor_updates.push((path.clone(), new_cursor)); // TODO cloning bere could be solved by more effectively storing the paths and related parser/cursors
+                    cursor_updates.push((path.clone(), new_cursor)); // TODO cloning here could be solved by more effectively storing the paths and related parser/cursors
                 }
             }
+            tracing::debug!("Parsing complete!");
             // TODO if this fails to store then we don't want to update state, because these would be skipped if we had to restart at the new state
             // Instead we should hold on to the events we failed to store, and attempt to store them with the next batch
             // If it fails a second time then the database is fucked, and we should restart
@@ -162,8 +172,8 @@ impl FileWatcher {
                 }
                 tracing::debug!("Saved {pending_count} pending spans from {} parsers", dirty_parsers.len());
             }
-            // Store the end of this file as its cursor so we can start from here after a restart
             if !cursor_updates.is_empty() {
+                // TODO needs some sort of duplicate reduction
                 tracing::debug!("Saving {} new cursor locations...", cursor_updates.len());
                 for (path, cursor) in cursor_updates.iter() {
                     let path = path.to_str().expect("Invalid path");
@@ -182,8 +192,12 @@ impl FileWatcher {
 
 async fn build_file_parser_map(resolved: HashMap<PathBuf, Vec<Parser>>) -> anyhow::Result<FileParserMapping> {
     let mut map = FileParserMapping::default();
-    for (path, path_parsers) in resolved {
+    for (path, mut path_parsers) in resolved {
         let file_len = get_file_len(&path).await?;
+        let seed = path.to_string_lossy();
+        for parser in path_parsers.iter_mut() {
+            parser.set_file_seed(&seed);
+        }
         let ParserOffsets { parsers, offset } = map.entry(path).or_default();
         parsers.extend(path_parsers);
         *offset = file_len;
@@ -192,18 +206,7 @@ async fn build_file_parser_map(resolved: HashMap<PathBuf, Vec<Parser>>) -> anyho
 }
 
 /// Restores pending span state and rewinds file cursors after a watcher restart.
-///
-/// For each pending span record:
-/// - If a saved cursor exists for the file, the cursor is rewound to
-///   `min(saved, current)` so content written during downtime is re-read.
-/// - The span is restored into the matching parser so it can be completed
-///   when its END line is eventually encountered.
-///
-/// Records whose path or parser name are not present in the map are silently
-/// ignored (they refer to config that has since been removed).
 fn restore_pending_state(file_parser_map: &mut FileParserMapping, pending: Vec<PendingSpanRecord>, saved_cursors: &HashMap<String, u64>) {
-    // Rewind ALL files with saved cursors first — singles-only files never produce
-    // pending span records so they would otherwise keep file_len as their cursor.
     for (path_str, &saved) in saved_cursors {
         let path = PathBuf::from(path_str);
         if let Some(ParserOffsets { offset, .. }) = file_parser_map.get_mut(&path) {
@@ -214,7 +217,7 @@ fn restore_pending_state(file_parser_map: &mut FileParserMapping, pending: Vec<P
         let path = PathBuf::from(&record.file_path);
         if let Some(ParserOffsets { parsers, .. }) = file_parser_map.get_mut(&path) {
             if let Some(p) = parsers.iter_mut().find(|p| p.name() == record.parser_name) {
-                p.restore_pending(vec![(record.span_ref, record.id, record.timestamp, record.data, record.parent_id, record.raw_line)]);
+                p.restore_pending(vec![(record.span_ref, record.id, record.timestamp, record.data, record.parent_id, record.raw_line.unwrap_or_default())]);
             }
         }
     }
@@ -307,7 +310,7 @@ reference_fields = ["ref"]
             timestamp: NaiveDateTime::parse_from_str("2026-01-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap(),
             data: HashMap::from([("ref".to_string(), span_ref.to_string())]),
             parent_id: None,
-            raw_line: None,
+            raw_line: Some(String::new()),
         }
     }
 

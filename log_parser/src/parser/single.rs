@@ -1,6 +1,7 @@
 use regex::Regex;
 use tracing::warn;
 
+use crate::pending_span::id_from_line;
 use shared::event::Event;
 
 #[derive(Debug, Clone)]
@@ -8,7 +9,7 @@ pub struct InternalSingleParser {
     pub name: String,
     pub pattern: Regex,
     pub timestamp_format: String,
-    pub include_raw: bool,
+    pub file_seed: Option<String>,
 }
 
 impl InternalSingleParser {
@@ -20,7 +21,11 @@ impl InternalSingleParser {
             };
             let mut capture_names = self.pattern.capture_names();
             let data = super::extract_data(&mut capture_names, &captures);
-            Some(Event::new_single(&self.name, timestamp, data, self.include_raw.then(|| input.to_string())))
+            let seed = match &self.file_seed {
+                Some(fs) => format!("{}|{}", fs, input),
+                None => input.to_string(),
+            };
+            Some(Event::new_single(&self.name, timestamp, data, input.to_string()).with_id(id_from_line(&seed)))
         } else {
             None
         }
@@ -45,11 +50,18 @@ mod tests {
         }
     }
 
+    fn zero_raw(e: &mut Event) {
+        match e {
+            Event::Span { raw_lines, .. } => *raw_lines = (String::new(), String::new()),
+            Event::Single { raw_line, .. } => *raw_line = String::new(),
+        }
+    }
+
     const TS_FMT: &str = "%Y-%m-%d %H:%M:%S";
 
     fn test_single(data: &[(&str, &str)], timestamp: &str) -> Event {
         let (ts, data_map) = common_test_data(data, timestamp);
-        let mut e = Event::new_single("test", NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(), data_map, None);
+        let mut e = Event::new_single("test", NaiveDateTime::parse_from_str(&ts, TS_FMT).unwrap(), data_map, String::new());
         set_id(&mut e, TEST_ID);
         e
     }
@@ -77,10 +89,10 @@ mod tests {
             name: "test".into(),
             pattern: Regex::new(pattern).unwrap(),
             timestamp_format: TS_FMT.into(),
-            include_raw: false,
+            file_seed: None,
         };
         let mut actual = parser.parse_line_with_context(log);
-        actual.iter_mut().for_each(|f| set_id(f, TEST_ID));
+        actual.iter_mut().for_each(|f| { set_id(f, TEST_ID); zero_raw(f); });
         assert_eq!(actual, expected);
     }
 
@@ -91,7 +103,7 @@ mod tests {
             name: "test".into(),
             pattern: Regex::new(r"(?P<timestamp>[0-9/]+ [0-9:]+)").unwrap(),
             timestamp_format: TS_FMT.into(), // expects "%Y-%m-%d %H:%M:%S", not slash format
-            include_raw: false,
+            file_seed: None,
         };
         let actual = parser.parse_line_with_context("15/01/2026 08:00:00");
         assert!(actual.is_none());
@@ -108,12 +120,13 @@ mod tests {
             name: "test".into(),
             pattern: Regex::new(pattern).unwrap(),
             timestamp_format: TS_FMT.into(),
-            include_raw: false,
+            file_seed: None,
         };
         let actual = parser.parse_line_with_context(line);
         if [&actual, &expected].into_iter().all(Option::is_some) {
             let (mut actual, expected) = (actual.unwrap(), expected.unwrap());
             set_id(&mut actual, TEST_ID);
+            zero_raw(&mut actual);
             assert_eq!(actual, expected);
         } else if ![&actual, &expected].into_iter().all(Option::is_none) {
             panic!("{actual:?} != {expected:?}");
