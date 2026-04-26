@@ -12,6 +12,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let config_path = std::env::args().nth(1).ok_or(anyhow::anyhow!("Usage: file_watcher <config_path>"))?;
     let config_file = fs::read(config_path).await?;
+
+    // TODO the below needs to be in a loop so that the main_join_handle returning a datqbase issue can make this rebuild the watcher and restart parsing
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     let mut watcher = FileWatcher::new(config_file).await?.with_receiver(rx);
     let main_join_handle = tokio::spawn(async move { watcher.run().await });

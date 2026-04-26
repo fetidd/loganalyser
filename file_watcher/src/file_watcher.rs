@@ -67,7 +67,7 @@ impl FileWatcher {
     pub async fn run(&mut self) -> anyhow::Result<ExitReason> {
         let Self { file_parser_map, storage, state, settings, rx } = self;
         let mut interval = tokio::time::interval(Duration::from_secs(settings.poll_interval_secs));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay); // TODO make configurable
+        interval.set_missed_tick_behavior(MissedTickBehavior::Burst); // TODO make configurable
         let mut exit_reason = ExitReason::Unknown;
         let mut storage_failures = 0;
         let mut failed_events = vec![];
@@ -165,14 +165,14 @@ impl FileWatcher {
             // Store the end of this file as its cursor so we can start from here after a restart
             if !cursor_updates.is_empty() {
                 for (path, cursor) in cursor_updates {
-                    let state = Arc::clone(state);
                     let path = path.to_str().expect("Invalid path");
+                    let state = Arc::clone(state);
                     let _ = shared::async_retry!(state.save_cursor(path, cursor)).await;
                 }
             }
             if before_parse.elapsed() > Duration::from_secs(self.settings.poll_interval_secs) {
                 // TODO we won't check this on a storage failure
-                tracing::warn!("processing time exceeded polling interval!");
+                tracing::warn!("processing time exceeded polling interval! {:?} > {}", before_parse.elapsed(), self.settings.poll_interval_secs);
             }
         }
         Ok(exit_reason)
