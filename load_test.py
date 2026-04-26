@@ -42,10 +42,19 @@ _RESET  = "\033[0m"
 _H = f"{_GREEN}[harness]{_RESET} "
 _W = f"{_YELLOW}[watcher]{_RESET} "
 
-_START_RE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) START$')
-_END_RE   = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) END$')
-_LOG_RE   = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} LOG ')
-_NOTE_RE  = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z]{3} NOTE ')
+_START_RE  = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) START$')
+_END_RE    = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) END$')
+_BEGIN_RE  = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) BEGIN$')
+_DONE_RE   = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) DONE$')
+_OPEN_RE   = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) OPEN$')
+_CLOSE_RE  = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ([A-Z]{3}) CLOSE$')
+_LOG_RE    = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} LOG ')
+_NOTE_RE   = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z]{3} NOTE ')
+_WARN_RE   = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z]{3} WARN ')
+_STEP_RE   = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z]{3} STEP ')
+_PING_RE   = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [A-Z]{3} PING ')
+_ERROR_RE  = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ERROR \S+ attempt #\d+')
+_METRIC_RE = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} METRIC \w+=\d+')
 
 LOGFILE = open("./load_test.log", "w")
 
@@ -79,10 +88,14 @@ def build(release: bool) -> Path:
 # ---------------------------------------------------------------------------
 
 # Parser profiles, cycling across files so each run exercises different combinations.
-#   full         — single event parser + span parser with nested (current behaviour)
-#   singles_only — only a single event parser; exercises high-volume single-event path
-#   spans_only   — only a span parser with nested; exercises concurrent span-state tracking
-_PROFILES = ["full", "singles_only", "spans_only"]
+#   full         — LOG single + span(START/END) with NOTE nested
+#   singles_only — LOG single only; high-volume single-event path
+#   spans_only   — span(START/END) with NOTE nested only
+#   multi_single — LOG + ERROR + METRIC singles; multiple parsers, no spans
+#   heavy_span   — LOG single + span(START/END) with NOTE and WARN nested
+#   multi_span   — two independent span parsers: span(START/END)+NOTE, span(BEGIN/DONE)+STEP
+#   triple_span  — three independent span parsers: as above + span(OPEN/CLOSE)+PING
+_PROFILES = ["full", "singles_only", "spans_only", "multi_single", "heavy_span", "multi_span", "triple_span"]
 
 def _profile(i: int) -> str:
     return _PROFILES[i % len(_PROFILES)]
@@ -90,13 +103,28 @@ def _profile(i: int) -> str:
 
 def _parser_sections(i: int, path: str, profile: str) -> list[str]:
     out = []
-    if profile in ("full", "singles_only"):
+    if profile in ("full", "singles_only", "multi_single", "heavy_span"):
         out += [
             "[[parsers]]",
             f'name    = "single_{i}"',
             f'glob    = "{path}"',
             'type    = "single"',
             r"pattern = '(?P<timestamp>${timestamp}) LOG (?P<msg>.*)'",
+            "",
+        ]
+    if profile == "multi_single":
+        out += [
+            "[[parsers]]",
+            f'name    = "error_{i}"',
+            f'glob    = "{path}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) ERROR (?P<code>\S+) attempt #(?P<n>\d+)'",
+            "",
+            "[[parsers]]",
+            f'name    = "metric_{i}"',
+            f'glob    = "{path}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) METRIC (?P<key>\w+)=(?P<value>\d+)'",
             "",
         ]
     if profile in ("full", "spans_only"):
@@ -113,6 +141,72 @@ def _parser_sections(i: int, path: str, profile: str) -> list[str]:
             f'name    = "span_inner_{i}"',
             'type    = "single"',
             r"pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) NOTE (?P<msg>.*)'",
+            "",
+        ]
+    if profile == "heavy_span":
+        out += [
+            "[[parsers]]",
+            f'name             = "span_{i}"',
+            f'glob             = "{path}"',
+            'type             = "span"',
+            r"start_pattern    = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) START'",
+            r"end_pattern      = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) END'",
+            'reference_fields = ["ref"]',
+            "",
+            "[[parsers.nested]]",
+            f'name    = "span_note_{i}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) NOTE (?P<msg>.*)'",
+            "",
+            "[[parsers.nested]]",
+            f'name    = "span_warn_{i}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) WARN (?P<msg>.*)'",
+            "",
+        ]
+    if profile in ("multi_span", "triple_span"):
+        out += [
+            "[[parsers]]",
+            f'name             = "span_a_{i}"',
+            f'glob             = "{path}"',
+            'type             = "span"',
+            r"start_pattern    = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) START'",
+            r"end_pattern      = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) END'",
+            'reference_fields = ["ref"]',
+            "",
+            "[[parsers.nested]]",
+            f'name    = "span_a_note_{i}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) NOTE (?P<msg>.*)'",
+            "",
+            "[[parsers]]",
+            f'name             = "span_b_{i}"',
+            f'glob             = "{path}"',
+            'type             = "span"',
+            r"start_pattern    = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) BEGIN'",
+            r"end_pattern      = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) DONE'",
+            'reference_fields = ["ref"]',
+            "",
+            "[[parsers.nested]]",
+            f'name    = "span_b_step_{i}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) STEP (?P<msg>.*)'",
+            "",
+        ]
+    if profile == "triple_span":
+        out += [
+            "[[parsers]]",
+            f'name             = "span_c_{i}"',
+            f'glob             = "{path}"',
+            'type             = "span"',
+            r"start_pattern    = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) OPEN'",
+            r"end_pattern      = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) CLOSE'",
+            'reference_fields = ["ref"]',
+            "",
+            "[[parsers.nested]]",
+            f'name    = "span_c_ping_{i}"',
+            'type    = "single"',
+            r"pattern = '(?P<timestamp>${timestamp}) (?P<ref>${ref}) PING (?P<msg>.*)'",
             "",
         ]
     return out
@@ -180,9 +274,15 @@ class WriterThread(threading.Thread):
         # noise_ratio = noise lines per parseable line (e.g. 10 → 10 noise per 1 parseable)
         # convert to fraction of all lines: ratio / (ratio + 1)
         self._noise_fraction = noise_ratio / (noise_ratio + 1)
-        self._open_refs: list[str] = []
+        self._open_refs:   list[str] = []  # START/END
+        self._open_refs_b: list[str] = []  # BEGIN/DONE
+        self._open_refs_c: list[str] = []  # OPEN/CLOSE
         self._ref_counter = 0
         self._note_counter = 0
+        self._step_counter = 0
+        self._ping_counter = 0
+        self._error_counter = 0
+        self._metric_counter = 0
         self.noise_written = 0
 
     def _next_ref(self) -> str:
@@ -204,6 +304,18 @@ class WriterThread(threading.Thread):
         n = self.stats.get(self.file_index, 0)
         return f"{ts} LOG event #{n} from file {self.file_index}"
 
+    def _error_line(self, ts: str) -> str:
+        codes = ["ERR_TIMEOUT", "ERR_CONN_REFUSED", "ERR_NOT_FOUND", "ERR_PERMISSION", "ERR_OVERFLOW"]
+        n = self._error_counter
+        self._error_counter += 1
+        return f"{ts} ERROR {random.choice(codes)} attempt #{n}"
+
+    def _metric_line(self, ts: str) -> str:
+        keys = ["req_count", "queue_depth", "cache_hits", "active_conns", "latency_ms", "error_rate"]
+        value = random.randint(0, 9999)
+        self._metric_counter += 1
+        return f"{ts} METRIC {random.choice(keys)}={value}"
+
     def _span_line(self, ts: str) -> str:
         at_cap = len(self._open_refs) >= self.max_open_spans
         if (not self._open_refs) or (random.random() < 0.40 and not at_cap):
@@ -213,9 +325,36 @@ class WriterThread(threading.Thread):
         if random.random() < 0.3 and len(self._open_refs) > 1:
             ref = random.choice(self._open_refs)
             self._note_counter += 1
-            return f"{ts} {ref} NOTE msg_{self._note_counter}"
+            kind = "WARN" if self.profile == "heavy_span" and random.random() < 0.5 else "NOTE"
+            return f"{ts} {ref} {kind} msg_{self._note_counter}"
         ref = self._open_refs.pop(random.randrange(len(self._open_refs)))
         return f"{ts} {ref} END"
+
+    def _span_b_line(self, ts: str) -> str:
+        at_cap = len(self._open_refs_b) >= self.max_open_spans
+        if (not self._open_refs_b) or (random.random() < 0.40 and not at_cap):
+            ref = self._next_ref()
+            self._open_refs_b.append(ref)
+            return f"{ts} {ref} BEGIN"
+        if random.random() < 0.3 and len(self._open_refs_b) > 1:
+            ref = random.choice(self._open_refs_b)
+            self._step_counter += 1
+            return f"{ts} {ref} STEP msg_{self._step_counter}"
+        ref = self._open_refs_b.pop(random.randrange(len(self._open_refs_b)))
+        return f"{ts} {ref} DONE"
+
+    def _span_c_line(self, ts: str) -> str:
+        at_cap = len(self._open_refs_c) >= self.max_open_spans
+        if (not self._open_refs_c) or (random.random() < 0.40 and not at_cap):
+            ref = self._next_ref()
+            self._open_refs_c.append(ref)
+            return f"{ts} {ref} OPEN"
+        if random.random() < 0.3 and len(self._open_refs_c) > 1:
+            ref = random.choice(self._open_refs_c)
+            self._ping_counter += 1
+            return f"{ts} {ref} PING msg_{self._ping_counter}"
+        ref = self._open_refs_c.pop(random.randrange(len(self._open_refs_c)))
+        return f"{ts} {ref} CLOSE"
 
     def _make_line(self) -> str:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -230,6 +369,32 @@ class WriterThread(threading.Thread):
 
         if self.profile == "spans_only":
             return self._span_line(ts)
+
+        if self.profile == "multi_single":
+            r = random.random()
+            if r < 0.50:
+                return self._log_line(ts)
+            elif r < 0.75:
+                return self._error_line(ts)
+            else:
+                return self._metric_line(ts)
+
+        if self.profile == "heavy_span":
+            if random.random() < 0.40:
+                return self._log_line(ts)
+            return self._span_line(ts)
+
+        if self.profile == "multi_span":
+            return self._span_line(ts) if random.random() < 0.5 else self._span_b_line(ts)
+
+        if self.profile == "triple_span":
+            r = random.random()
+            if r < 0.34:
+                return self._span_line(ts)
+            elif r < 0.67:
+                return self._span_b_line(ts)
+            else:
+                return self._span_c_line(ts)
 
         # "full": mix of single events and spans
         if random.random() < 0.60:
@@ -415,7 +580,9 @@ def _diff_logs(log_paths: list[Path], db_path: Path | None, mysql_url: str | Non
     # Build expected set from log files
     expected: list[str] = []
     for log_path in log_paths:
-        open_spans: dict[str, str] = {}  # ref -> start_line
+        open_spans:   dict[str, str] = {}  # START → END
+        open_spans_b: dict[str, str] = {}  # BEGIN → DONE
+        open_spans_c: dict[str, str] = {}  # OPEN  → CLOSE
         for raw in log_path.read_text().splitlines():
             line = raw.strip()
             if not line:
@@ -430,7 +597,27 @@ def _diff_logs(log_paths: list[Path], db_path: Path | None, mysql_url: str | Non
                 if ref in open_spans:
                     expected.append(open_spans.pop(ref) + "\n" + line)
                 continue
-            if _LOG_RE.match(line) or _NOTE_RE.match(line):
+            m = _BEGIN_RE.match(line)
+            if m:
+                open_spans_b[m.group(2)] = line
+                continue
+            m = _DONE_RE.match(line)
+            if m:
+                ref = m.group(2)
+                if ref in open_spans_b:
+                    expected.append(open_spans_b.pop(ref) + "\n" + line)
+                continue
+            m = _OPEN_RE.match(line)
+            if m:
+                open_spans_c[m.group(2)] = line
+                continue
+            m = _CLOSE_RE.match(line)
+            if m:
+                ref = m.group(2)
+                if ref in open_spans_c:
+                    expected.append(open_spans_c.pop(ref) + "\n" + line)
+                continue
+            if _LOG_RE.match(line) or _NOTE_RE.match(line) or _WARN_RE.match(line) or _STEP_RE.match(line) or _PING_RE.match(line) or _ERROR_RE.match(line) or _METRIC_RE.match(line):
                 expected.append(line)
 
     # Fetch stored raw_lines from DB as a Counter (multiset) — two events with
@@ -593,12 +780,16 @@ class LoadTest:
         # Close any spans still open so the watcher can complete them during drain
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for w in self.writers:
-            if w._open_refs:
+            pending = [(w._open_refs, "END"), (w._open_refs_b, "DONE"), (w._open_refs_c, "CLOSE")]
+            if any(refs for refs, _ in pending):
                 with w.file_path.open("a") as f:
-                    for ref in w._open_refs:
-                        f.write(f"{ts} {ref} END\n")
-                        self.writer_stats[w.file_index] = self.writer_stats.get(w.file_index, 0) + 1
+                    for refs, keyword in pending:
+                        for ref in refs:
+                            f.write(f"{ts} {ref} {keyword}\n")
+                            self.writer_stats[w.file_index] = self.writer_stats.get(w.file_index, 0) + 1
                 w._open_refs.clear()
+                w._open_refs_b.clear()
+                w._open_refs_c.clear()
 
         self.final_written = sum(v for v in self.writer_stats.values() if isinstance(v, int))
         self.total_noise = sum(w.noise_written for w in self.writers)
