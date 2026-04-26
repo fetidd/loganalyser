@@ -85,8 +85,6 @@ struct BuildCtx<'a> {
 impl Parser {
     pub fn from_config_file(config_file: &[u8]) -> Result<HashMap<PathBuf, Vec<Parser>>> {
         let config: RawConfig = toml::from_slice(config_file)?;
-        tracing::debug!("created parser config: {config:?}");
-
         let mut parsers: HashMap<PathBuf, Vec<Parser>> = HashMap::new();
         for raw in &config.parsers {
             let glob_pattern = raw.glob().ok_or_else(|| error("top-level parser missing 'glob'"))?;

@@ -19,6 +19,7 @@ pub struct PendingSpanRecord {
     pub raw_line: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct State {
     pool: SqlitePool,
 }

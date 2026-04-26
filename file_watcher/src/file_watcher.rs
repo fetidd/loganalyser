@@ -45,8 +45,11 @@ impl FileWatcher {
         let storage = make_storage(&config.storage).await?;
         tracing::debug!("storage created: {storage:?}");
         let state = State::new(&config).await?;
-        let built_parsers = Parser::from_config_file(&config_file)?;
+        tracing::debug!("state created: {state:?}");
+        let built_parsers = Parser::from_config_file(&config_file)?; // TODO make this take a ref to an actual Config, not the contents of the file
         let mut file_parser_map = build_file_parser_map(built_parsers).await?;
+
+        // Reload any saved state from the last run
         let saved_cursors = state.load_cursors().await?;
         let pending = state.load_pending().await?;
         restore_pending_state(&mut file_parser_map, pending, &saved_cursors);
@@ -67,27 +70,23 @@ impl FileWatcher {
     pub async fn run(&mut self) -> anyhow::Result<ExitReason> {
         let Self { file_parser_map, storage, state, settings, rx } = self;
         let mut interval = tokio::time::interval(Duration::from_secs(settings.poll_interval_secs));
-        interval.set_missed_tick_behavior(MissedTickBehavior::Burst); // TODO make configurable
-        let mut exit_reason = ExitReason::Unknown;
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay); // TODO make configurable
         let mut storage_failures = 0;
-        let mut failed_events = vec![];
 
+        let mut events = vec![];
+        let mut cursor_updates = vec![];
         'main: loop {
             if let Some(rx) = rx
                 && rx.try_recv().is_ok()
             {
-                // Set an exit reason here, either requested by the Receiver, or a restart because the events db is screwed
-                exit_reason = ExitReason::Interrupt;
-                break 'main;
+                return Ok(ExitReason::Interrupt);
             }
 
+            // Wait until the configured poll interval has elapsed before running again
             interval.tick().await;
 
-            let mut events = vec![]; // TODO move these out of the loop, and keep draining them? Then we won't reallocate Vecs
-            let mut dirty_parsers = vec![];
-            let mut cursor_updates = vec![];
-
             let before_parse = Instant::now();
+            let mut dirty_parsers = vec![]; // TODO move these out of the loop, and keep draining them? Then we won't reallocate Vecs - requires some refactoring as they borrow from the current loop
 
             for (path, ParserOffsets { parsers, offset }) in file_parser_map.iter_mut() {
                 let file_len = get_file_len(path).await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
@@ -97,8 +96,6 @@ impl FileWatcher {
                     continue;
                 } else if file_len > *offset {
                     // The file has been written to since we last checked it, so we need to parse out the new logs
-                    tracing::debug!("{path:?} has new log lines...");
-
                     // Read the file to the end and break up into lines
                     let mut file = BufReader::new(fs::File::open(&path).await?); // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                     file.seek(SeekFrom::Start(*offset)).await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
@@ -119,15 +116,14 @@ impl FileWatcher {
                                 && let Some(pending) = parser.pending_spans().cloned()
                             {
                                 parser.clean();
-                                dirty_parsers.push((parser.name().to_string(), path, pending)); // TODO is there a better way to denote parsers than using their name?
+                                dirty_parsers.push((parser.name().to_string(), path, pending)); // TODO is there a better way to denote parsers than using their name? Maybe register them in a map at the top with ids?
                                 break;
                             }
                             // Otherwise try the next parser
                         }
                     }
-                    tracing::debug!("found {file_events:?}");
                     events.extend(file_events);
-                    let new_cursor = get_file_len(path).await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
+                    let new_cursor = lines.into_inner().stream_position().await?; // TODO what about if this fails? Do we warn and then blacklist the file? Send alerts when theyre working? Try a restart?
                     *offset = new_cursor;
                     cursor_updates.push((path.clone(), new_cursor)); // TODO cloning bere could be solved by more effectively storing the paths and related parser/cursors
                 }
@@ -141,41 +137,46 @@ impl FileWatcher {
                 if let Err(error) = shared::async_retry!(storage.store(events_slice)).await {
                     // Even after retrying we failed to store the found events
                     // We do not want to save the new state as we havent stored the events
+                    let num_failed = events.len();
                     if storage_failures == 0 {
                         // If this is the first time this connection has done this, queue the events and try the loop again, hopefully next time these events and the next ones will be able to store
-                        failed_events.extend(events.drain(..));
+                        tracing::warn!("Failed to store {num_failed} events, will retry!");
                         storage_failures += 1;
-                        continue 'main;
+                        continue 'main; // continue to the next iteration without saving state
                     } else {
                         // If this is the second time we are here, then we should restart the watcher with a new db connection
-                        let num_failed = events.len();
-                        tracing::error!("Failed to store {num_failed} events: {error:?}",);
-                        exit_reason = ExitReason::DatabaseFailure;
-                        break 'main;
+                        tracing::error!("Failed to store {num_failed} events, restarting watcher...: {error:?}",);
+                        return Ok(ExitReason::DatabaseFailure);
                     }
                 }
+                tracing::debug!("Saved {} new events", events.len());
+                events.clear();
             }
             if !dirty_parsers.is_empty() {
-                for (parser_name, path, pending) in dirty_parsers {
+                let mut pending_count = 0;
+                for (parser_name, path, pending) in dirty_parsers.iter() {
                     let path = path.to_str().expect("Invalid path");
                     let state = Arc::clone(state);
+                    pending_count += pending.len();
                     let _ = shared::async_retry!(state.save_pending(path, &parser_name, &pending)).await;
                 }
+                tracing::debug!("Saved {pending_count} pending spans from {} parsers", dirty_parsers.len());
             }
             // Store the end of this file as its cursor so we can start from here after a restart
             if !cursor_updates.is_empty() {
-                for (path, cursor) in cursor_updates {
+                tracing::debug!("Saving {} new cursor locations...", cursor_updates.len());
+                for (path, cursor) in cursor_updates.iter() {
                     let path = path.to_str().expect("Invalid path");
                     let state = Arc::clone(state);
-                    let _ = shared::async_retry!(state.save_cursor(path, cursor)).await;
+                    let _ = shared::async_retry!(state.save_cursor(path, *cursor)).await;
                 }
+                cursor_updates.clear();
             }
             if before_parse.elapsed() > Duration::from_secs(self.settings.poll_interval_secs) {
                 // TODO we won't check this on a storage failure
-                tracing::warn!("processing time exceeded polling interval! {:?} > {}", before_parse.elapsed(), self.settings.poll_interval_secs);
+                tracing::warn!("processing time exceeded polling interval!");
             }
         }
-        Ok(exit_reason)
     }
 }
 
@@ -201,12 +202,17 @@ async fn build_file_parser_map(resolved: HashMap<PathBuf, Vec<Parser>>) -> anyho
 /// Records whose path or parser name are not present in the map are silently
 /// ignored (they refer to config that has since been removed).
 fn restore_pending_state(file_parser_map: &mut FileParserMapping, pending: Vec<PendingSpanRecord>, saved_cursors: &HashMap<String, u64>) {
+    // Rewind ALL files with saved cursors first — singles-only files never produce
+    // pending span records so they would otherwise keep file_len as their cursor.
+    for (path_str, &saved) in saved_cursors {
+        let path = PathBuf::from(path_str);
+        if let Some(ParserOffsets { offset, .. }) = file_parser_map.get_mut(&path) {
+            *offset = saved.min(*offset);
+        }
+    }
     for record in pending {
         let path = PathBuf::from(&record.file_path);
-        if let Some(ParserOffsets { parsers, offset: cursor_loc }) = file_parser_map.get_mut(&path) {
-            if let Some(&saved) = saved_cursors.get(&record.file_path) {
-                *cursor_loc = saved.min(*cursor_loc);
-            }
+        if let Some(ParserOffsets { parsers, .. }) = file_parser_map.get_mut(&path) {
             if let Some(p) = parsers.iter_mut().find(|p| p.name() == record.parser_name) {
                 p.restore_pending(vec![(record.span_ref, record.id, record.timestamp, record.data, record.parent_id, record.raw_line)]);
             }
@@ -451,8 +457,8 @@ reference_fields = ["ref"]
     }
 
     #[test]
-    fn restore_only_rewinds_files_that_have_pending_records() {
-        // path_b has a saved cursor but no pending records — its cursor must not change.
+    fn restore_rewinds_all_files_with_saved_cursors() {
+        // path_b has a saved cursor but no pending records — it must still be rewound.
         let path_a = "/logs/a.log";
         let path_b = "/logs/b.log";
         let mut map = FileParserMapping::default();
@@ -463,6 +469,6 @@ reference_fields = ["ref"]
         restore_pending_state(&mut map, vec![pending_record(path_a, "sp", "ABC")], &saved);
 
         assert_eq!(map[&PathBuf::from(path_a)].offset, 10); // rewound
-        assert_eq!(map[&PathBuf::from(path_b)].offset, 200); // untouched
+        assert_eq!(map[&PathBuf::from(path_b)].offset, 20); // also rewound
     }
 }
