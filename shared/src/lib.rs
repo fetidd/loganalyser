@@ -1,6 +1,5 @@
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, ParseError};
 
-pub mod alert;
 pub mod env;
 pub mod event;
 pub mod event_filter;

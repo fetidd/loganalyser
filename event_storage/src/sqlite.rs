@@ -45,7 +45,6 @@ impl SqliteEventStore {
 
         Self { pool }
     }
-
 }
 
 struct SqliteDialect;
@@ -91,7 +90,7 @@ impl SqliteEventStore {
         Ok(())
     }
 
-    pub async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
+    pub async fn load(&self, filter: &Filter) -> Result<Vec<Event>> {
         let Params(where_sql, bindings) = Self::get_where_sql(&filter);
         let query = format!("SELECT id, event_type, name, timestamp, duration_ms, parent_id, data, raw_line FROM events{where_sql}",);
         let mut query = sqlx::query(&query);

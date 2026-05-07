@@ -28,7 +28,7 @@ struct RootSpan {
 }
 
 pub async fn handler(State(state): State<AppState>) -> HtmlResult {
-    let events = state.store.load(Filter::new()).await.map_err(storage_err)?;
+    let events = state.store.load(&Filter::new()).await.map_err(storage_err)?;
     let mut root_spans: Vec<RootSpan> = events
         .iter()
         .filter_map(|e| match e {
@@ -175,7 +175,7 @@ fn find_node<'a>(nodes: &'a [EventNode], id: &str) -> Option<&'a EventNode> {
 }
 
 pub async fn waterfall(State(state): State<AppState>, Query(query): Query<WaterfallQuery>) -> HtmlResult {
-    let events = state.store.load(Filter::new()).await.map_err(storage_err)?;
+    let events = state.store.load(&Filter::new()).await.map_err(storage_err)?;
     let tree = build_tree(events);
     let target_id = query.id.trim();
 

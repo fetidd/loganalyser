@@ -170,8 +170,7 @@ fn compile_pattern(pattern: &str, components: &HashMap<String, String>) -> Resul
 /// Components are pure pattern fragments; named fields must be declared
 /// explicitly with `(?P<name>...)` in the pattern itself.
 fn expand_components(pattern: &str, components: &HashMap<String, String>) -> Result<String> {
-    expand_vars(pattern, |name| components.get(name).map(|v| format!("(?:{v})")))
-        .map_err(|e| error(&e.to_string()))
+    expand_vars(pattern, |name| components.get(name).map(|v| format!("(?:{v})"))).map_err(|e| error(&e.to_string()))
 }
 
 fn validate_required_fields(pattern: &Regex, fields: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {

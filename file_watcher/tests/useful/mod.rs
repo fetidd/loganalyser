@@ -33,10 +33,10 @@ impl TestEnv {
 
     /// Polls storage until at least `min` events match `filter`, then returns
     /// them. Returns `Err` with a description if `timeout` elapses first.
-    pub async fn wait_for(&self, filter: Filter, min: usize, timeout: Duration) -> Result<Vec<Event>, String> {
+    pub async fn wait_for(&self, filter: &Filter, min: usize, timeout: Duration) -> Result<Vec<Event>, String> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let events = self.storage.load(filter.clone()).await.unwrap();
+            let events = self.storage.load(filter).await.unwrap();
             if events.len() >= min {
                 return Ok(events);
             }
@@ -97,7 +97,7 @@ pub async fn setup(config: &str) -> TestEnv {
     })
     .await
     .unwrap();
-    storage.load(Filter::new()).await.expect("events table not ready");
+    storage.load(&Filter::new()).await.expect("events table not ready");
     TestEnv {
         _temp_dir: temp_dir,
         log_file_path,

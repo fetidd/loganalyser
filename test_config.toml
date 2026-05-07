@@ -29,3 +29,9 @@ reference_fields = ["requestreference"]
 nested = [
     { name = "innerlog1", type = "single", pattern = '(?P<timestamp>${timestamp}) (?P<requestreference>${requestreference}) SOMETHING HAPPENED' },
 ]
+
+[[parsers.alerts]]
+name = "log2 duration"
+trigger = "once"
+filter = [{field = "duration", cmp = ">", value = 10000}]
+handler = { type = "email", to = "dev@mail.com", subject = "${parser.name} requests took too long", content = "%foreach event% ${event.requestreference} took ${event.duration} %end foreach%" }

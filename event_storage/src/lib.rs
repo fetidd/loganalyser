@@ -54,7 +54,7 @@ impl EventStorage {
         }
     }
 
-    pub async fn load(&self, filter: Filter) -> Result<Vec<Event>> {
+    pub async fn load(&self, filter: &Filter) -> Result<Vec<Event>> {
         match self {
             EventStorage::Sqlite(s) | EventStorage::InMemory(s) => s.load(filter).await,
             EventStorage::MySql(s) => s.load(filter).await,
@@ -77,7 +77,7 @@ mod tests {
         let event = Event::new_single("single1", shared::datetime_from("2026-01-01").unwrap(), HashMap::new(), String::new());
         let store = EventStorage::new_in_memory().await;
         store.store(&[event.clone()]).await.expect("failed to store");
-        let read = store.load(Filter::new()).await.expect("failed to load");
+        let read = store.load(&Filter::new()).await.expect("failed to load");
         assert_eq!(event, read[0]);
     }
 }

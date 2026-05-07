@@ -70,7 +70,7 @@ async fn load_page(state: &AppState, query: &EventsQuery, page: usize) -> Result
         }
     }
 
-    let mut events = state.store.load(filter).await.map_err(storage_err)?;
+    let mut events = state.store.load(&filter).await.map_err(storage_err)?;
 
     if let Some(kind) = &query.kind {
         events.retain(|e| match kind.as_str() {
@@ -140,7 +140,7 @@ pub async fn more(State(state): State<AppState>, Query(query): Query<EventsQuery
 // GET /events/{id}/detail
 pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> HtmlResult {
     let filter = Filter::new().with_id(Cmp::Eq(id));
-    let events = state.store.load(filter).await.map_err(storage_err)?;
+    let events = state.store.load(&filter).await.map_err(storage_err)?;
 
     let Some(event) = events.into_iter().next() else {
         return Ok(Html(r#"<tr class="detail-row"></tr>"#.into()));
